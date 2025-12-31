@@ -1,0 +1,75 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Audit request from the landing page form
+model AuditRequest {
+  id              String   @id @default(cuid())
+  websiteUrl      String
+  email           String
+  agreeScan       Boolean  @default(true)
+  agreeMarketing  Boolean  @default(false)
+  locale          String   @default("en")
+  status          AuditStatus @default(PENDING)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  auditReport     AuditReport?
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Audit report generated after scanning
+model AuditReport {
+  id              String   @id @default(cuid())
+  auditRequestId  String   @unique
+  auditRequest    AuditRequest @relation(fields: [auditRequestId], references: [id], onDelete: Cascade)
+  
+  // Scan results
+  cookiesFound    Json?    // Array of cookies detected
+  trackersFound   Json?    // Array of trackers detected
+  consentBanner   Boolean?
+  privacyPolicy   Boolean?
+  httpsEnabled    Boolean?
+  
+  // Scores
+  overallScore    Int?     // 0-100
+  riskLevel       RiskLevel @default(UNKNOWN)
+  
+  // Report content
+  summary         String?
+  recommendations Json?    // Array of recommendations
+  
+  scannedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([riskLevel])
+}
+
+enum AuditStatus {
+  PENDING      // Just submitted
+  PROCESSING   // Scan in progress
+  COMPLETED    // Report ready
+  FAILED       // Scan failed
+  CANCELLED    // User cancelled
+}
+
+enum RiskLevel {
+  UNKNOWN
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
