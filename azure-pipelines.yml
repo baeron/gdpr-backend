@@ -200,9 +200,11 @@ stages:
   # Stage 2: Deploy (only on main branch)
   # ============================================
   - stage: Deploy
-    displayName: 'Deploy'
+    displayName: 'Deploy to Vultr'
     dependsOn: Build
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      - group: vultr-deployment
     jobs:
       - deployment: DeployProduction
         displayName: 'Deploy to Production'
@@ -213,20 +215,48 @@ stages:
           runOnce:
             deploy:
               steps:
-                - download: current
-                  artifact: dist
-                  displayName: 'Download build artifact'
+                - checkout: self
 
-                # Add your deployment steps here
-                # Examples:
-                # - Azure App Service deployment
-                # - Docker build and push to ACR
-                # - Kubernetes deployment
-                
+                - task: InstallSSHKey@0
+                  displayName: 'Install SSH Key'
+                  inputs:
+                    knownHostsEntry: $(VULTR_KNOWN_HOSTS)
+                    sshKeySecureFile: 'vultr_deploy_key'
+
                 - script: |
-                    echo "Build artifact ready for deployment"
-                    echo "Add your deployment steps here:"
-                    echo "  - Azure App Service"
-                    echo "  - Docker/Kubernetes"
-                    echo "  - Or any other hosting platform"
-                  displayName: 'Deployment placeholder'
+                    # Copy project files to server
+                    rsync -avz --delete \
+                      --exclude 'node_modules' \
+                      --exclude '.git' \
+                      --exclude 'coverage' \
+                      --exclude '.env' \
+                      -e "ssh -o StrictHostKeyChecking=no" \
+                      ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
+                  displayName: 'Copy files to server'
+
+                - script: |
+                    ssh -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                      cd /opt/gdpr-backend
+                      
+                      # Build and restart containers
+                      docker-compose down
+                      docker-compose build --no-cache
+                      docker-compose up -d
+                      
+                      # Wait for health check
+                      sleep 10
+                      
+                      # Verify deployment
+                      curl -f http://localhost:3000/api/health || exit 1
+                      
+                      echo "Deployment successful!"
+                    EOF
+                  displayName: 'Deploy with Docker'
+
+                - script: |
+                    # Clean up old Docker images
+                    ssh -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                      docker image prune -f
+                    EOF
+                  displayName: 'Cleanup old images'
+                  condition: succeeded()

@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: gdpr-postgres-dev
+    environment:
+      POSTGRES_USER: gdpr
+      POSTGRES_PASSWORD: gdpr_dev
+      POSTGRES_DB: gdpr_audit
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdpr -d gdpr_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NestJS Backend (development mode with hot reload)
+  backend:
+    image: node:20-slim
+    container_name: gdpr-backend-dev
+    working_dir: /app
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://gdpr:gdpr_dev@postgres:5432/gdpr_audit?schema=public
+      PORT: 3000
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npx prisma generate && npm run start:dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_dev_data:
