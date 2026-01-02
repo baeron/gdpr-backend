@@ -1,0 +1,232 @@
+# Azure Pipelines CI/CD for NestJS Backend
+# GDPR Audit Backend API
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - '*.md'
+      - '.github/**'
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  nodeVersion: '20.x'
+  npmCacheFolder: $(Pipeline.Workspace)/.npm
+
+stages:
+  # ============================================
+  # Stage 1: Build & Test
+  # ============================================
+  - stage: Build
+    displayName: 'Build & Test'
+    jobs:
+      # Setup and cache dependencies
+      - job: Setup
+        displayName: 'Setup & Cache Dependencies'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Cache@2
+            displayName: 'Cache npm packages'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | package-lock.json'
+              restoreKeys: |
+                npm | "$(Agent.OS)"
+              path: $(npmCacheFolder)
+
+          - script: npm ci --cache $(npmCacheFolder)
+            displayName: 'Install dependencies'
+
+          - script: npx prisma generate
+            displayName: 'Generate Prisma client'
+
+          - publish: $(System.DefaultWorkingDirectory)/node_modules
+            artifact: node_modules
+            displayName: 'Publish node_modules'
+
+      # Lint job
+      - job: Lint
+        displayName: 'Lint'
+        dependsOn: Setup
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - download: current
+            artifact: node_modules
+            displayName: 'Download node_modules'
+
+          - script: |
+              mv $(Pipeline.Workspace)/node_modules $(System.DefaultWorkingDirectory)/node_modules
+            displayName: 'Restore node_modules'
+
+          - script: npm run lint
+            displayName: 'Run ESLint'
+
+      # Format check job
+      - job: Format
+        displayName: 'Format Check'
+        dependsOn: Setup
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - download: current
+            artifact: node_modules
+            displayName: 'Download node_modules'
+
+          - script: |
+              mv $(Pipeline.Workspace)/node_modules $(System.DefaultWorkingDirectory)/node_modules
+            displayName: 'Restore node_modules'
+
+          - script: npx prettier --check "src/**/*.ts" "test/**/*.ts"
+            displayName: 'Check code formatting'
+
+      # Unit Tests job
+      - job: Test
+        displayName: 'Unit Tests'
+        dependsOn: Setup
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - download: current
+            artifact: node_modules
+            displayName: 'Download node_modules'
+
+          - script: |
+              mv $(Pipeline.Workspace)/node_modules $(System.DefaultWorkingDirectory)/node_modules
+            displayName: 'Restore node_modules'
+
+          - script: npm run test:cov
+            displayName: 'Run unit tests with coverage'
+
+          - task: PublishCodeCoverageResults@2
+            displayName: 'Publish code coverage'
+            inputs:
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+            condition: succeededOrFailed()
+
+          - task: PublishTestResults@2
+            displayName: 'Publish test results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/junit.xml'
+              failTaskOnFailedTests: true
+            condition: succeededOrFailed()
+
+      # Build job
+      - job: BuildApp
+        displayName: 'Build Application'
+        dependsOn:
+          - Lint
+          - Format
+          - Test
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - download: current
+            artifact: node_modules
+            displayName: 'Download node_modules'
+
+          - script: |
+              mv $(Pipeline.Workspace)/node_modules $(System.DefaultWorkingDirectory)/node_modules
+            displayName: 'Restore node_modules'
+
+          - script: npm run build
+            displayName: 'Build application'
+
+          - publish: $(System.DefaultWorkingDirectory)/dist
+            artifact: dist
+            displayName: 'Publish build artifact'
+
+      # E2E Tests job
+      - job: E2E
+        displayName: 'E2E Tests'
+        dependsOn: BuildApp
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - download: current
+            artifact: node_modules
+            displayName: 'Download node_modules'
+
+          - download: current
+            artifact: dist
+            displayName: 'Download build artifact'
+
+          - script: |
+              mv $(Pipeline.Workspace)/node_modules $(System.DefaultWorkingDirectory)/node_modules
+              mv $(Pipeline.Workspace)/dist $(System.DefaultWorkingDirectory)/dist
+            displayName: 'Restore artifacts'
+
+          - script: npm run test:e2e
+            displayName: 'Run E2E tests'
+
+  # ============================================
+  # Stage 2: Deploy (only on main branch)
+  # ============================================
+  - stage: Deploy
+    displayName: 'Deploy'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: dist
+                  displayName: 'Download build artifact'
+
+                # Add your deployment steps here
+                # Examples:
+                # - Azure App Service deployment
+                # - Docker build and push to ACR
+                # - Kubernetes deployment
+                
+                - script: |
+                    echo "Build artifact ready for deployment"
+                    echo "Add your deployment steps here:"
+                    echo "  - Azure App Service"
+                    echo "  - Docker/Kubernetes"
+                    echo "  - Or any other hosting platform"
+                  displayName: 'Deployment placeholder'
