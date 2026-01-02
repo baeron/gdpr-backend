@@ -1,4 +1,10 @@
-import { IsEmail, IsUrl, IsBoolean, IsOptional, IsString } from 'class-validator';
+import {
+  IsEmail,
+  IsUrl,
+  IsBoolean,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class CreateAuditDto {
   @IsUrl({}, { message: 'Please provide a valid website URL' })

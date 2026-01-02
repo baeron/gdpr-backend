@@ -32,7 +32,9 @@ export class AuditService {
         },
       });
 
-      this.logger.log(`Audit request created: ${auditRequest.id} for ${websiteUrl}`);
+      this.logger.log(
+        `Audit request created: ${auditRequest.id} for ${websiteUrl}`,
+      );
 
       // Send confirmation email to user
       await this.emailService.sendAuditConfirmation({
@@ -53,12 +55,16 @@ export class AuditService {
 
       return {
         success: true,
-        message: 'Audit request submitted successfully. Check your email for confirmation.',
+        message:
+          'Audit request submitted successfully. Check your email for confirmation.',
         auditId: auditRequest.id,
       };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error(`Failed to create audit request: ${err.message}`, err.stack);
+      this.logger.error(
+        `Failed to create audit request: ${err.message}`,
+        err.stack,
+      );
       throw error;
     }
   }

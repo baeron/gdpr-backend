@@ -28,26 +28,35 @@ export class EmailService {
     this.resend = apiKey ? new Resend(apiKey) : null;
 
     if (!this.resend) {
-      this.logger.warn('RESEND_API_KEY not configured, emails will be logged only');
+      this.logger.warn(
+        'RESEND_API_KEY not configured, emails will be logged only',
+      );
     }
   }
 
-  async sendAuditConfirmation(params: AuditConfirmationParams): Promise<boolean> {
+  async sendAuditConfirmation(
+    params: AuditConfirmationParams,
+  ): Promise<boolean> {
     const { to, websiteUrl, auditId, locale } = params;
 
-    const subject = locale === 'de'
-      ? `Ihre GDPR-Audit-Anfrage - ${auditId}`
-      : `Your GDPR Audit Request - ${auditId}`;
+    const subject =
+      locale === 'de'
+        ? `Ihre GDPR-Audit-Anfrage - ${auditId}`
+        : `Your GDPR Audit Request - ${auditId}`;
 
     const html = this.generateConfirmationEmail(websiteUrl, auditId, locale);
 
     return this.sendEmail({ to, subject, html });
   }
 
-  async sendAdminNotification(params: AdminNotificationParams): Promise<boolean> {
+  async sendAdminNotification(
+    params: AdminNotificationParams,
+  ): Promise<boolean> {
     const adminEmail = this.configService.get<string>('ADMIN_EMAIL');
     if (!adminEmail) {
-      this.logger.warn('ADMIN_EMAIL not configured, skipping admin notification');
+      this.logger.warn(
+        'ADMIN_EMAIL not configured, skipping admin notification',
+      );
       return false;
     }
 
@@ -60,7 +69,11 @@ export class EmailService {
     });
   }
 
-  private async sendEmail(params: { to: string; subject: string; html: string }): Promise<boolean> {
+  private async sendEmail(params: {
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<boolean> {
     const { to, subject, html } = params;
 
     if (!this.resend) {
@@ -90,7 +103,11 @@ export class EmailService {
     }
   }
 
-  private generateConfirmationEmail(websiteUrl: string, auditId: string, locale: string): string {
+  private generateConfirmationEmail(
+    websiteUrl: string,
+    auditId: string,
+    locale: string,
+  ): string {
     const isGerman = locale === 'de';
 
     return `
@@ -138,7 +155,9 @@ export class EmailService {
     `;
   }
 
-  private generateAdminNotificationEmail(params: AdminNotificationParams): string {
+  private generateAdminNotificationEmail(
+    params: AdminNotificationParams,
+  ): string {
     return `
       <!DOCTYPE html>
       <html>

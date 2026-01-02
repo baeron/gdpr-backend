@@ -20,7 +20,9 @@ export class AuditController {
   @HttpCode(HttpStatus.OK)
   async createAudit(@Body() dto: CreateAuditDto): Promise<AuditResponseDto> {
     if (!dto.agreeScan) {
-      throw new BadRequestException('You must agree to have your website scanned');
+      throw new BadRequestException(
+        'You must agree to have your website scanned',
+      );
     }
 
     return this.auditService.createAuditRequest(dto);
