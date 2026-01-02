@@ -84,7 +84,8 @@ export class EmailService {
       this.logger.log(`Email sent to ${to}: ${subject}`);
       return true;
     } catch (error) {
-      this.logger.error(`Email send error: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Email send error: ${err.message}`, err.stack);
       return false;
     }
   }

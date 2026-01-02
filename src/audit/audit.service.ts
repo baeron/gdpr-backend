@@ -57,7 +57,8 @@ export class AuditService {
         auditId: auditRequest.id,
       };
     } catch (error) {
-      this.logger.error(`Failed to create audit request: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Failed to create audit request: ${err.message}`, err.stack);
       throw error;
     }
   }
