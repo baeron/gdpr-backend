@@ -45,7 +45,9 @@ stages:
                 npm | "$(Agent.OS)"
               path: $(npmCacheFolder)
 
-          - script: npm ci --cache $(npmCacheFolder)
+          - script: |
+              npm ci --cache $(npmCacheFolder)
+              chmod -R +x node_modules/.bin
             displayName: 'Install dependencies'
 
           - script: npx prisma generate
@@ -73,7 +75,9 @@ stages:
                 npm | "$(Agent.OS)"
               path: $(npmCacheFolder)
 
-          - script: npm ci --cache $(npmCacheFolder)
+          - script: |
+              npm ci --cache $(npmCacheFolder)
+              chmod -R +x node_modules/.bin
             displayName: 'Install dependencies'
 
           - script: npx prisma generate
@@ -101,7 +105,9 @@ stages:
                 npm | "$(Agent.OS)"
               path: $(npmCacheFolder)
 
-          - script: npm ci --cache $(npmCacheFolder)
+          - script: |
+              npm ci --cache $(npmCacheFolder)
+              chmod -R +x node_modules/.bin
             displayName: 'Install dependencies'
 
           - script: npx prisma generate
@@ -147,7 +153,9 @@ stages:
                 npm | "$(Agent.OS)"
               path: $(npmCacheFolder)
 
-          - script: npm ci --cache $(npmCacheFolder)
+          - script: |
+              npm ci --cache $(npmCacheFolder)
+              chmod -R +x node_modules/.bin
             displayName: 'Install dependencies'
 
           - script: npx prisma generate
@@ -180,7 +188,9 @@ stages:
                 npm | "$(Agent.OS)"
               path: $(npmCacheFolder)
 
-          - script: npm ci --cache $(npmCacheFolder)
+          - script: |
+              npm ci --cache $(npmCacheFolder)
+              chmod -R +x node_modules/.bin
             displayName: 'Install dependencies'
 
           - script: npx prisma generate
