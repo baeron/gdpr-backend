@@ -227,11 +227,13 @@ stages:
               steps:
                 - checkout: self
 
-                - task: InstallSSHKey@0
-                  displayName: 'Install SSH Key'
-                  inputs:
-                    knownHostsEntry: $(VULTR_KNOWN_HOSTS)
-                    sshKeySecureFile: 'vultr_deploy_key'
+                - script: |
+                    echo '$(VULTR_SSH_KEY)' > /tmp/ssh_key
+                    chmod 600 /tmp/ssh_key
+                    eval "$(ssh-agent -s)"
+                    ssh-add /tmp/ssh_key
+                    rm /tmp/ssh_key
+                  displayName: 'Setup SSH Key'
 
                 - script: |
                     # Copy project files to server
@@ -240,12 +242,12 @@ stages:
                       --exclude '.git' \
                       --exclude 'coverage' \
                       --exclude '.env' \
-                      -e "ssh -o StrictHostKeyChecking=no" \
+                      -e "ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key" \
                       ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
                   displayName: 'Copy files to server'
 
                 - script: |
-                    ssh -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                    ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key deploy@$(VULTR_HOST) << 'EOF'
                       cd /opt/gdpr-backend
                       
                       # Build and restart containers
@@ -265,7 +267,7 @@ stages:
 
                 - script: |
                     # Clean up old Docker images
-                    ssh -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                    ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key deploy@$(VULTR_HOST) << 'EOF'
                       docker image prune -f
                     EOF
                   displayName: 'Cleanup old images'
