@@ -4,6 +4,11 @@ import request from 'supertest';
 import { AppController } from './../src/app.controller';
 import { AppService } from './../src/app.service';
 
+interface HealthResponse {
+  status: string;
+  timestamp: string;
+}
+
 describe('AppController (e2e)', () => {
   let app: INestApplication;
 
@@ -29,7 +34,7 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/health')
       .expect(200)
-      .expect((res) => {
+      .expect((res: { body: HealthResponse }) => {
         expect(res.body.status).toBe('ok');
         expect(res.body.timestamp).toBeDefined();
       });
