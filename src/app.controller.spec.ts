@@ -15,8 +15,20 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('should return API info', () => {
+      expect(appController.getHello()).toEqual({
+        name: 'PolicyTracker API',
+        version: '1.0.0',
+        description: 'GDPR Audit & Compliance Backend Service',
+      });
+    });
+  });
+
+  describe('health', () => {
+    it('should return health status', () => {
+      const result = appController.getHealth();
+      expect(result.status).toBe('ok');
+      expect(result.timestamp).toBeDefined();
     });
   });
 });
