@@ -230,9 +230,6 @@ stages:
                 - script: |
                     echo '$(VULTR_SSH_KEY)' > /tmp/ssh_key
                     chmod 600 /tmp/ssh_key
-                    eval "$(ssh-agent -s)"
-                    ssh-add /tmp/ssh_key
-                    rm /tmp/ssh_key
                   displayName: 'Setup SSH Key'
 
                 - script: |
