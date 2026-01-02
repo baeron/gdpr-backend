@@ -18,14 +18,11 @@ describe('AppController (e2e)', () => {
   });
 
   it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect({
-        name: 'PolicyTracker API',
-        version: '1.0.0',
-        description: 'GDPR Audit & Compliance Backend Service',
-      });
+    return request(app.getHttpServer()).get('/').expect(200).expect({
+      name: 'PolicyTracker API',
+      version: '1.0.0',
+      description: 'GDPR Audit & Compliance Backend Service',
+    });
   });
 
   it('/health (GET)', () => {
