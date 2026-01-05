@@ -11,12 +11,15 @@ async function bootstrap() {
     'https://policytracker.eu',
     'https://www.policytracker.eu',
   ];
-  
+
   app.enableCors({
-    origin: function (origin, callback) {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
-      
+
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
