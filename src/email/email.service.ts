@@ -21,7 +21,7 @@ interface AdminNotificationParams {
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private readonly resend: Resend | null;
-  private readonly fromEmail = 'GDPR Audit <onboarding@resend.dev>';
+  private readonly fromEmail = 'GDPR Audit <noreply@policytracker.eu>';
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('RESEND_API_KEY');
