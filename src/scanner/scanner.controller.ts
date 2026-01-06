@@ -1,9 +1,10 @@
-import { Controller, Post, Body, Logger, Get, Param, Query, Patch, Delete } from '@nestjs/common';
+import { Controller, Post, Body, Logger, Get, Param, Query, Patch, Delete, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiProperty, ApiQuery } from '@nestjs/swagger';
 import { IsString, IsUrl, IsOptional, IsBoolean, IsNumber, IsEmail } from 'class-validator';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
-import { ScannerQueueService } from './scanner-queue.service';
+import { QUEUE_SERVICE } from './queue/queue.interface';
+import type { IQueueService } from './queue/queue.interface';
 import { ScanResultDto } from './dto/scan-result.dto';
 
 export class ScanRequestDto {
@@ -86,7 +87,7 @@ export class ScannerController {
   constructor(
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
-    private readonly queueService: ScannerQueueService,
+    @Inject(QUEUE_SERVICE) private readonly queueService: IQueueService,
   ) {}
 
   @Post('scan')
@@ -264,7 +265,7 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
   })
   async queueScan(@Body() body: QueueScanRequestDto) {
     this.logger.log(`Queueing scan for: ${body.websiteUrl}`);
-    return this.queueService.queueScan(body);
+    return this.queueService.addJob(body);
   }
 
   @Get('job/:id')
@@ -331,6 +332,6 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
     },
   })
   async getQueueStats() {
-    return this.queueService.getQueueStats();
+    return this.queueService.getStats();
   }
 }

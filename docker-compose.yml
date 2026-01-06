@@ -1,7 +1,28 @@
 version: '3.8'
 
+# ============================================================
+# GDPR Audit - Docker Compose
+# ============================================================
+# 
+# PROFILES:
+#   - default: API + PostgreSQL (PostgreSQL queue)
+#   - redis:   API + PostgreSQL + Redis (Bull queue)
+#   - scaled:  API + PostgreSQL + Redis + separate Worker
+#
+# USAGE:
+#   Development (PostgreSQL queue):
+#     docker-compose up -d
+#
+#   With Redis (Bull queue):
+#     docker-compose --profile redis up -d
+#
+#   Scaled (separate worker):
+#     docker-compose --profile scaled up -d
+#
+# ============================================================
+
 services:
-  # PostgreSQL Database
+  # ==================== DATABASE ====================
   postgres:
     image: postgres:16-alpine
     container_name: gdpr-postgres
@@ -12,24 +33,48 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-gdpr_audit}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gdpr} -d ${POSTGRES_DB:-gdpr_audit}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # NestJS Backend
-  backend:
+  # ==================== REDIS (optional) ====================
+  redis:
+    image: redis:7-alpine
+    container_name: gdpr-redis
+    restart: unless-stopped
+    profiles: ["redis", "scaled"]
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== API SERVER ====================
+  api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: gdpr-backend
+    container_name: gdpr-api
     restart: unless-stopped
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
       PORT: 3000
       RESEND_API_KEY: ${RESEND_API_KEY}
+      # Queue configuration
+      QUEUE_TYPE: ${QUEUE_TYPE:-postgres}  # postgres | redis
+      REDIS_URL: redis://redis:6379
+      # Worker mode: api runs scanner inline when QUEUE_TYPE=postgres
+      WORKER_ENABLED: ${WORKER_ENABLED:-true}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -46,5 +91,66 @@ services:
         npm run start:prod
       "
 
+  # ==================== API with Redis ====================
+  api-redis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gdpr-api-redis
+    restart: unless-stopped
+    profiles: ["redis"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
+      PORT: 3000
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      QUEUE_TYPE: redis
+      REDIS_URL: redis://redis:6379
+      WORKER_ENABLED: true
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    command: >
+      sh -c "
+        npx prisma migrate deploy &&
+        npm run start:prod
+      "
+
+  # ==================== SEPARATE WORKER (scaled) ====================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gdpr-worker
+    restart: unless-stopped
+    profiles: ["scaled"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
+      QUEUE_TYPE: redis
+      REDIS_URL: redis://redis:6379
+      WORKER_MODE: true  # Only process jobs, no HTTP server
+      WORKER_CONCURRENCY: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Can scale workers: docker-compose --profile scaled up -d --scale worker=3
+    deploy:
+      resources:
+        limits:
+          memory: 512M  # Limit memory per worker
+
 volumes:
   postgres_data:
+  redis_data:
