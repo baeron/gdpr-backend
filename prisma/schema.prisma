@@ -33,29 +33,94 @@ model AuditRequest {
 // Audit report generated after scanning
 model AuditReport {
   id              String   @id @default(cuid())
-  auditRequestId  String   @unique
-  auditRequest    AuditRequest @relation(fields: [auditRequestId], references: [id], onDelete: Cascade)
+  auditRequestId  String?  @unique
+  auditRequest    AuditRequest? @relation(fields: [auditRequestId], references: [id], onDelete: Cascade)
   
-  // Scan results
-  cookiesFound    Json?    // Array of cookies detected
-  trackersFound   Json?    // Array of trackers detected
-  consentBanner   Boolean?
-  privacyPolicy   Boolean?
-  httpsEnabled    Boolean?
+  // Basic info
+  websiteUrl      String
+  scanDurationMs  Int?
   
   // Scores
   overallScore    Int?     // 0-100
   riskLevel       RiskLevel @default(UNKNOWN)
   
-  // Report content
-  summary         String?
-  recommendations Json?    // Array of recommendations
+  // Scan results (stored as JSON for flexibility)
+  cookies         Json?    // { total, beforeConsent, list: CookieInfo[] }
+  trackers        Json?    // { total, beforeConsent, list: TrackerInfo[] }
+  thirdPartyRequests Json? // { total, beforeConsent, list: ThirdPartyRequest[] }
+  consentBanner   Json?    // ConsentBannerInfo
+  privacyPolicy   Json?    // PrivacyPolicyInfo
+  security        Json?    // SecurityInfo
+  forms           Json?    // FormsAnalysisResult
+  dataTransfers   Json?    // DataTransferInfo
+  technologies    Json?    // TechnologyDetectionResult
+  
+  // Issues (separate table for querying)
+  issues          ScanIssue[]
   
   scannedAt       DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([websiteUrl])
   @@index([riskLevel])
+  @@index([scannedAt])
+}
+
+// Individual scan issues for detailed reporting
+model ScanIssue {
+  id              String   @id @default(cuid())
+  auditReportId   String
+  auditReport     AuditReport @relation(fields: [auditReportId], references: [id], onDelete: Cascade)
+  
+  // Issue identification
+  code            String   // e.g., "COOKIES_BEFORE_CONSENT"
+  category        IssueCategory
+  
+  // Issue details
+  title           String
+  description     String   @db.Text
+  riskLevel       RiskLevel
+  
+  // Evidence and recommendations
+  evidence        String?  @db.Text  // Specific proof (cookie names, URLs, etc.)
+  recommendation  String   @db.Text
+  codeExample     String?  @db.Text  // Implementation example
+  
+  // Effort estimation
+  effortHours     String?  // e.g., "2-4"
+  estimatedCost   String?  // e.g., "€150-300"
+  
+  // Status tracking
+  status          IssueStatus @default(OPEN)
+  resolvedAt      DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([auditReportId])
+  @@index([category])
+  @@index([riskLevel])
+  @@index([status])
+}
+
+enum IssueCategory {
+  COOKIES
+  TRACKERS
+  CONSENT
+  PRIVACY_POLICY
+  SECURITY
+  FORMS
+  DATA_TRANSFER
+  TECHNOLOGY
+  OTHER
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  WONT_FIX
 }
 
 enum AuditStatus {
