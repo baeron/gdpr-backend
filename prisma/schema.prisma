@@ -123,6 +123,49 @@ enum IssueStatus {
   WONT_FIX
 }
 
+// Scan job queue for async processing
+model ScanJob {
+  id              String    @id @default(cuid())
+  websiteUrl      String
+  auditRequestId  String?
+  
+  // Job status
+  status          ScanJobStatus @default(QUEUED)
+  priority        Int       @default(0)  // Higher = more priority
+  
+  // Progress tracking
+  progress        Int       @default(0)  // 0-100
+  currentStep     String?   // e.g., "Analyzing cookies..."
+  
+  // Results
+  reportId        String?   // Link to AuditReport when completed
+  error           String?   // Error message if failed
+  
+  // Timing
+  queuedAt        DateTime  @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  
+  // Metadata
+  userEmail       String?
+  locale          String    @default("en")
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([queuedAt])
+  @@index([priority, queuedAt])
+}
+
+enum ScanJobStatus {
+  QUEUED      // Waiting in queue
+  PROCESSING  // Currently scanning
+  COMPLETED   // Scan finished successfully
+  FAILED      // Scan failed with error
+  CANCELLED   // User cancelled
+}
+
 enum AuditStatus {
   PENDING      // Just submitted
   PROCESSING   // Scan in progress

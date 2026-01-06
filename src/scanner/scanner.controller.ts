@@ -1,8 +1,9 @@
-import { Controller, Post, Body, Logger, Get, Param, Query, Patch } from '@nestjs/common';
+import { Controller, Post, Body, Logger, Get, Param, Query, Patch, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiProperty, ApiQuery } from '@nestjs/swagger';
-import { IsString, IsUrl, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsUrl, IsOptional, IsBoolean, IsNumber, IsEmail } from 'class-validator';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
+import { ScannerQueueService } from './scanner-queue.service';
 import { ScanResultDto } from './dto/scan-result.dto';
 
 export class ScanRequestDto {
@@ -42,6 +43,41 @@ export class UpdateIssueStatusDto {
   status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'WONT_FIX';
 }
 
+export class QueueScanRequestDto {
+  @ApiProperty({
+    description: 'Website URL to scan for GDPR compliance',
+    example: 'https://example.com',
+  })
+  @IsString()
+  @IsUrl({}, { message: 'Please provide a valid URL' })
+  websiteUrl: string;
+
+  @ApiProperty({
+    description: 'Link to existing audit request ID',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  auditRequestId?: string;
+
+  @ApiProperty({
+    description: 'User email for notifications',
+    required: false,
+  })
+  @IsOptional()
+  @IsEmail()
+  userEmail?: string;
+
+  @ApiProperty({
+    description: 'Priority (higher = processed first)',
+    required: false,
+    default: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  priority?: number;
+}
+
 @ApiTags('scanner')
 @Controller('scanner')
 export class ScannerController {
@@ -50,6 +86,7 @@ export class ScannerController {
   constructor(
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
+    private readonly queueService: ScannerQueueService,
   ) {}
 
   @Post('scan')
@@ -190,5 +227,110 @@ Performs a comprehensive GDPR compliance scan on the specified website.
   ) {
     this.logger.log(`Updating issue ${id} status to: ${body.status}`);
     return this.reportService.updateIssueStatus(id, body.status);
+  }
+
+  // ============ ASYNC QUEUE ENDPOINTS ============
+
+  @Post('queue')
+  @ApiOperation({
+    summary: 'Queue a scan (async, recommended)',
+    description: `
+Adds a website scan to the processing queue. Returns immediately with a job ID.
+
+**Recommended for production use** - prevents server overload on limited resources.
+
+Use \`GET /scanner/job/:id\` to poll for status and results.
+
+**Flow:**
+1. POST /scanner/queue → { jobId, status: "QUEUED", position: 3 }
+2. Poll GET /scanner/job/:id → { status: "PROCESSING", progress: 45 }
+3. Poll GET /scanner/job/:id → { status: "COMPLETED", reportId: "..." }
+4. GET /scanner/report/:reportId → Full report
+    `,
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Scan queued successfully',
+    schema: {
+      example: {
+        id: 'clx1234567890',
+        websiteUrl: 'https://example.com',
+        status: 'QUEUED',
+        position: 3,
+        estimatedWaitMinutes: 3,
+        progress: 0,
+      },
+    },
+  })
+  async queueScan(@Body() body: QueueScanRequestDto) {
+    this.logger.log(`Queueing scan for: ${body.websiteUrl}`);
+    return this.queueService.queueScan(body);
+  }
+
+  @Get('job/:id')
+  @ApiOperation({
+    summary: 'Get scan job status',
+    description: 'Check the status of a queued/processing scan job. Poll this endpoint to track progress.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Job status',
+    schema: {
+      example: {
+        id: 'clx1234567890',
+        websiteUrl: 'https://example.com',
+        status: 'PROCESSING',
+        progress: 45,
+        currentStep: 'Analyzing cookies...',
+        position: null,
+        reportId: null,
+        estimatedWaitMinutes: null,
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Job not found' })
+  async getJobStatus(@Param('id') id: string) {
+    this.logger.log(`Fetching job status: ${id}`);
+    const status = await this.queueService.getJobStatus(id);
+    if (!status) {
+      return { error: 'Job not found' };
+    }
+    return status;
+  }
+
+  @Delete('job/:id')
+  @ApiOperation({
+    summary: 'Cancel a queued scan',
+    description: 'Cancel a scan that is still in the queue (not yet processing).',
+  })
+  @ApiResponse({ status: 200, description: 'Job cancelled' })
+  @ApiResponse({ status: 400, description: 'Job cannot be cancelled (already processing or completed)' })
+  async cancelJob(@Param('id') id: string) {
+    this.logger.log(`Cancelling job: ${id}`);
+    const cancelled = await this.queueService.cancelJob(id);
+    return { cancelled };
+  }
+
+  @Get('queue/stats')
+  @ApiOperation({
+    summary: 'Get queue statistics',
+    description: 'Returns current queue status: jobs waiting, processing, completed, etc.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Queue statistics',
+    schema: {
+      example: {
+        queued: 5,
+        processing: 1,
+        completed: 42,
+        failed: 2,
+        maxConcurrent: 1,
+        estimatedWaitPerJob: 60,
+      },
+    },
+  })
+  async getQueueStats() {
+    return this.queueService.getQueueStats();
   }
 }
