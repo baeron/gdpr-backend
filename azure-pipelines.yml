@@ -18,6 +18,10 @@ pr:
 variables:
   nodeVersion: '20.x'
   npmCacheFolder: $(Pipeline.Workspace)/.npm
+  # Queue configuration: 'postgres' (default, no Redis) or 'redis' (requires more RAM)
+  queueType: 'postgres'
+  # Docker Compose profile: '' (default), 'redis', or 'scaled'
+  dockerProfile: ''
 
 stages:
   # ============================================
@@ -252,16 +256,31 @@ stages:
                     ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
                       cd /opt/gdpr-backend
                       
+                      # Set queue type (postgres = no Redis, redis = with Redis)
+                      export QUEUE_TYPE=$(queueType)
+                      
                       # Build and restart containers
                       docker-compose down
-                      docker-compose build --no-cache
-                      docker-compose up -d
+                      
+                      # Use profile if specified (redis or scaled)
+                      if [ -n "$(dockerProfile)" ]; then
+                        echo "Deploying with profile: $(dockerProfile)"
+                        docker-compose --profile $(dockerProfile) build --no-cache
+                        docker-compose --profile $(dockerProfile) up -d
+                      else
+                        echo "Deploying default (PostgreSQL queue)"
+                        docker-compose build --no-cache
+                        docker-compose up -d
+                      fi
                       
                       # Wait for health check
-                      sleep 10
+                      sleep 15
                       
                       # Verify deployment
                       curl -f http://localhost:3000/api/health || exit 1
+                      
+                      # Show queue stats
+                      curl -s http://localhost:3000/api/scanner/queue/stats | jq . || true
                       
                       echo "Deployment successful!"
                     EOF
