@@ -12,7 +12,7 @@ import { RedisQueueService } from './queue/redis-queue.service';
 const queueProvider = {
   provide: QUEUE_SERVICE,
   useFactory: (
-    prisma: any,
+    prisma: PrismaService,
     scanner: ScannerService,
     report: ScannerReportService,
   ) => {
@@ -26,7 +26,7 @@ const queueProvider = {
     console.log('📦 Using PostgreSQL queue');
     return new PostgresQueueService(prisma, scanner, report);
   },
-  inject: ['PrismaService', ScannerService, ScannerReportService],
+  inject: [PrismaService, ScannerService, ScannerReportService],
 };
 
 @Module({
