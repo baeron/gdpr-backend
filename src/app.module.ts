@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuditModule } from './audit/audit.module';
 import { EmailModule } from './email/email.module';
 import { ScannerModule } from './scanner/scanner.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ScannerModule } from './scanner/scanner.module';
     EmailModule,
     AuditModule,
     ScannerModule,
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

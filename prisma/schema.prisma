@@ -58,6 +58,9 @@ model AuditReport {
   // Issues (separate table for querying)
   issues          ScanIssue[]
   
+  // Payment/access control
+  fullReportUnlocked Boolean @default(false)
+  
   scannedAt       DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -180,4 +183,42 @@ enum RiskLevel {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+// Payment for full report access
+model Payment {
+  id                    String        @id @default(cuid())
+  reportId              String
+  
+  // Stripe data
+  stripeSessionId       String?       @unique
+  stripePaymentIntentId String?
+  
+  // Amount
+  amount                Int           // in cents
+  currency              String        @default("eur")
+  
+  // A/B test tracking
+  priceVariant          String?       // 'A' or 'B'
+  
+  // Status
+  status                PaymentStatus @default(PENDING)
+  
+  // User info
+  userEmail             String?
+  
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([reportId])
+  @@index([stripeSessionId])
+  @@index([status])
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+  REFUNDED
 }

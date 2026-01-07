@@ -255,11 +255,17 @@ stages:
                   displayName: 'Copy files to server'
 
                 - script: |
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << EOF
                       set -e
                       cd /opt/gdpr-backend
                       
                       echo "=== Starting deployment ==="
+                      
+                      # Update .env with secrets
+                      echo "Updating environment variables..."
+                      grep -v "^STRIPE_SECRET_KEY=" .env > .env.tmp 2>/dev/null || true
+                      echo "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" >> .env.tmp
+                      mv .env.tmp .env
                       
                       # Set queue type (postgres = no Redis, redis = with Redis)
                       export QUEUE_TYPE=$(queueType)
