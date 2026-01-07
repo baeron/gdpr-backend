@@ -1,10 +1,12 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apk add --no-cache openssl openssl-dev
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
@@ -22,15 +24,12 @@ COPY . .
 # Build application
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine AS production
+# Production stage - use Playwright's official image base
+FROM mcr.microsoft.com/playwright:v1.52.0-noble AS production
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma runtime
-RUN apk add --no-cache openssl
-
-# Copy package files and install production dependencies only
+# Copy package files and install production dependencies
 COPY package*.json ./
 COPY prisma ./prisma/
 RUN npm ci --only=production
@@ -40,12 +39,6 @@ RUN npx prisma generate
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
-
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nestjs -u 1001 -G nodejs
-
-USER nestjs
 
 # Expose port
 EXPOSE 3000
