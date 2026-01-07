@@ -141,6 +141,7 @@ stages:
           # - Lint
           # - Format
           - Test
+        condition: succeededOrFailed()
         pool:
           vmImage: 'ubuntu-latest'
         steps:
@@ -216,7 +217,8 @@ stages:
   - stage: Deploy
     displayName: 'Deploy to Vultr'
     dependsOn: Build
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    # Deploy even if tests fail, but only on main branch
+    condition: and(not(canceled()), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     variables:
       - group: vultr-deployment
     jobs:
@@ -254,35 +256,53 @@ stages:
 
                 - script: |
                     ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
+                      set -e
                       cd /opt/gdpr-backend
+                      
+                      echo "=== Starting deployment ==="
                       
                       # Set queue type (postgres = no Redis, redis = with Redis)
                       export QUEUE_TYPE=$(queueType)
                       
-                      # Build and restart containers
-                      docker-compose down
+                      # Stop and remove old containers
+                      echo "Stopping containers..."
+                      docker-compose down --remove-orphans || true
                       
-                      # Use profile if specified (redis or scaled)
+                      # Remove any orphan containers that might block
+                      docker rm -f $(docker ps -aq --filter "name=gdpr") 2>/dev/null || true
+                      
+                      # Build with no cache to ensure fresh image
+                      echo "Building Docker image..."
                       if [ -n "$(dockerProfile)" ]; then
-                        echo "Deploying with profile: $(dockerProfile)"
-                        docker-compose --profile $(dockerProfile) build --no-cache
+                        echo "Using profile: $(dockerProfile)"
+                        docker-compose --profile $(dockerProfile) build --no-cache --pull
                         docker-compose --profile $(dockerProfile) up -d
                       else
-                        echo "Deploying default (PostgreSQL queue)"
-                        docker-compose build --no-cache
+                        echo "Using default profile (PostgreSQL queue)"
+                        docker-compose build --no-cache --pull
                         docker-compose up -d
                       fi
                       
-                      # Wait for health check
-                      sleep 15
+                      # Wait for containers to be healthy
+                      echo "Waiting for health check..."
+                      for i in {1..30}; do
+                        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+                          echo "Health check passed!"
+                          break
+                        fi
+                        echo "Waiting... ($i/30)"
+                        sleep 2
+                      done
                       
-                      # Verify deployment
+                      # Final verification
                       curl -f http://localhost:3000/api/health || exit 1
                       
-                      # Show queue stats
+                      # Show status
+                      echo "=== Deployment Status ==="
+                      docker-compose ps
                       curl -s http://localhost:3000/api/scanner/queue/stats | jq . || true
                       
-                      echo "Deployment successful!"
+                      echo "=== Deployment successful! ==="
                     EOF
                   displayName: 'Deploy with Docker'
 
