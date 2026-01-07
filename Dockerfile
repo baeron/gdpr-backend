@@ -25,7 +25,7 @@ COPY . .
 RUN npm run build
 
 # Production stage - use Playwright's official image base
-FROM mcr.microsoft.com/playwright:v1.52.0-noble AS production
+FROM mcr.microsoft.com/playwright:v1.57.0-noble AS production
 
 WORKDIR /app
 
