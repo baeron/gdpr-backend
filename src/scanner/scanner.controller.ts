@@ -77,6 +77,15 @@ export class QueueScanRequestDto {
   @IsOptional()
   @IsNumber()
   priority?: number;
+
+  @ApiProperty({
+    description: 'User locale for notifications',
+    required: false,
+    example: 'en',
+  })
+  @IsOptional()
+  @IsString()
+  locale?: string;
 }
 
 @ApiTags('scanner')
