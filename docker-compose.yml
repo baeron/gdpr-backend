@@ -74,7 +74,7 @@ services:
       QUEUE_TYPE: ${QUEUE_TYPE:-postgres}  # postgres | redis
       REDIS_URL: redis://redis:6379
       # Worker mode: api runs scanner inline when QUEUE_TYPE=postgres
-      WORKER_ENABLED: ${WORKER_ENABLED:-true}
+      WORKER_ENABLED: "${WORKER_ENABLED:-true}"
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -106,7 +106,7 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
-      WORKER_ENABLED: true
+      WORKER_ENABLED: "true"
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -138,7 +138,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
-      WORKER_MODE: true  # Only process jobs, no HTTP server
+      WORKER_MODE: "true"  # Only process jobs, no HTTP server
       WORKER_CONCURRENCY: 1
     depends_on:
       postgres:
