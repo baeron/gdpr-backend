@@ -12,14 +12,29 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiProperty } from '@nestjs/swagger';
+import { IsString, IsOptional, IsIn } from 'class-validator';
 import type { Request } from 'express';
 import { PaymentService } from './payment.service';
 
 class CreateCheckoutDto {
+  @ApiProperty({ description: 'Report ID to purchase' })
+  @IsString()
   reportId: string;
+
+  @ApiProperty({ description: 'User email', required: false })
+  @IsOptional()
+  @IsString()
   userEmail?: string;
+
+  @ApiProperty({ description: 'User region/locale', required: false })
+  @IsOptional()
+  @IsString()
   region?: string;
+
+  @ApiProperty({ description: 'A/B test variant', required: false, enum: ['A', 'B'] })
+  @IsOptional()
+  @IsIn(['A', 'B'])
   variant?: 'A' | 'B';
 }
 
