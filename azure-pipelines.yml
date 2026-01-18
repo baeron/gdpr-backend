@@ -212,21 +212,21 @@ stages:
             displayName: 'Run E2E tests'
 
   # ============================================
-  # Stage 2: Deploy (only on main branch)
+  # Stage 2: Deploy to DEV (automatic after Build)
   # ============================================
-  - stage: Deploy
-    displayName: 'Deploy to Vultr'
+  - stage: DeployDev
+    displayName: 'Deploy to DEV'
     dependsOn: Build
-    # Deploy even if tests fail, but only on main branch
-    condition: and(not(canceled()), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     variables:
       - group: vultr-deployment
+      - group: gdpr-secrets-dev
     jobs:
-      - deployment: DeployProduction
-        displayName: 'Deploy to Production'
+      - deployment: DeployDev
+        displayName: 'Deploy to DEV Environment'
         pool:
           vmImage: 'ubuntu-latest'
-        environment: 'production'
+        environment: 'development'
         strategy:
           runOnce:
             deploy:
@@ -234,63 +234,45 @@ stages:
                 - checkout: self
 
                 - script: |
-                    # Setup SSH key
                     mkdir -p ~/.ssh
                     echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
                     chmod 600 ~/.ssh/deploy_key
-                    
-                    # Add host to known_hosts
                     ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
                   displayName: 'Setup SSH Key'
 
                 - script: |
-                    # Copy project files to server
                     rsync -avz --delete \
                       --exclude 'node_modules' \
                       --exclude '.git' \
                       --exclude 'coverage' \
-                      --exclude '.env' \
+                      --exclude '.env*' \
                       -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
                       ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
                   displayName: 'Copy files to server'
 
                 - script: |
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << EOF
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'DEPLOY_SCRIPT'
                       set -e
                       cd /opt/gdpr-backend
                       
-                      echo "=== Starting deployment ==="
+                      echo "=== Starting DEV deployment ==="
                       
-                      # Update .env with secrets
-                      echo "Updating environment variables..."
-                      grep -v "^STRIPE_SECRET_KEY=" .env > .env.tmp 2>/dev/null || true
-                      echo "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" >> .env.tmp
-                      mv .env.tmp .env
+                      # Create .env from Azure DevOps secrets
+                      cat > .env << ENV_FILE
+                    POSTGRES_USER=$(POSTGRES_USER)
+                    POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
+                    POSTGRES_DB=$(POSTGRES_DB)
+                    RESEND_API_KEY=$(RESEND_API_KEY)
+                    STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)
+                    STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)
+                    NODE_ENV=development
+                    ENV_FILE
                       
-                      # Set queue type (postgres = no Redis, redis = with Redis)
-                      export QUEUE_TYPE=$(queueType)
-                      
-                      # Stop and remove old containers
-                      echo "Stopping containers..."
                       docker-compose down --remove-orphans || true
+                      docker-compose build --no-cache --pull
+                      docker-compose up -d
                       
-                      # Remove any orphan containers that might block
-                      docker rm -f $(docker ps -aq --filter "name=gdpr") 2>/dev/null || true
-                      
-                      # Build with no cache to ensure fresh image
-                      echo "Building Docker image..."
-                      if [ -n "$(dockerProfile)" ]; then
-                        echo "Using profile: $(dockerProfile)"
-                        docker-compose --profile $(dockerProfile) build --no-cache --pull
-                        docker-compose --profile $(dockerProfile) up -d
-                      else
-                        echo "Using default profile (PostgreSQL queue)"
-                        docker-compose build --no-cache --pull
-                        docker-compose up -d
-                      fi
-                      
-                      # Wait for containers to be healthy
-                      echo "Waiting for health check..."
+                      # Wait for health check
                       for i in {1..30}; do
                         if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
                           echo "Health check passed!"
@@ -300,20 +282,90 @@ stages:
                         sleep 2
                       done
                       
-                      # Final verification
                       curl -f http://localhost:3000/api/health || exit 1
-                      
-                      # Show status
-                      echo "=== Deployment Status ==="
-                      docker-compose ps
-                      curl -s http://localhost:3000/api/scanner/queue/stats | jq . || true
-                      
-                      echo "=== Deployment successful! ==="
-                    EOF
-                  displayName: 'Deploy with Docker'
+                      echo "=== DEV Deployment successful! ==="
+                    DEPLOY_SCRIPT
+                  displayName: 'Deploy to DEV'
+
+  # ============================================
+  # Stage 3: Deploy to PROD (manual approval required)
+  # ============================================
+  - stage: DeployProd
+    displayName: 'Deploy to PROD'
+    dependsOn: DeployDev
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      - group: vultr-deployment
+      - group: gdpr-secrets-prod
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to PROD Environment'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'production'  # Requires manual approval in Azure DevOps
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
 
                 - script: |
-                    # Clean up old Docker images
+                    mkdir -p ~/.ssh
+                    echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
+                    chmod 600 ~/.ssh/deploy_key
+                    ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
+                  displayName: 'Setup SSH Key'
+
+                - script: |
+                    rsync -avz --delete \
+                      --exclude 'node_modules' \
+                      --exclude '.git' \
+                      --exclude 'coverage' \
+                      --exclude '.env*' \
+                      -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+                      ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
+                  displayName: 'Copy files to server'
+
+                - script: |
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'DEPLOY_SCRIPT'
+                      set -e
+                      cd /opt/gdpr-backend
+                      
+                      echo "=== Starting PROD deployment ==="
+                      
+                      # Create .env from Azure DevOps secrets
+                      cat > .env << ENV_FILE
+                    POSTGRES_USER=$(POSTGRES_USER)
+                    POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
+                    POSTGRES_DB=$(POSTGRES_DB)
+                    RESEND_API_KEY=$(RESEND_API_KEY)
+                    STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)
+                    STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)
+                    NODE_ENV=production
+                    ENV_FILE
+                      
+                      docker-compose down --remove-orphans || true
+                      docker-compose build --no-cache --pull
+                      docker-compose up -d
+                      
+                      # Wait for health check
+                      for i in {1..30}; do
+                        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+                          echo "Health check passed!"
+                          break
+                        fi
+                        echo "Waiting... ($i/30)"
+                        sleep 2
+                      done
+                      
+                      curl -f http://localhost:3000/api/health || exit 1
+                      
+                      docker-compose ps
+                      echo "=== PROD Deployment successful! ==="
+                    DEPLOY_SCRIPT
+                  displayName: 'Deploy to PROD'
+
+                - script: |
                     ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
                       docker image prune -f
                     EOF
