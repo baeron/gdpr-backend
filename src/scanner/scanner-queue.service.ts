@@ -76,7 +76,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Queueing scan for: ${request.websiteUrl}`);
 
     // Create job in queue
-    const job = await (this.prisma as any).scanJob.create({
+    const job = await this.prisma.scanJob.create({
       data: {
         websiteUrl: request.websiteUrl,
         auditRequestId: request.auditRequestId,
@@ -98,7 +98,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getJobStatus(jobId: string): Promise<ScanJobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
 
@@ -109,7 +109,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
 
@@ -117,7 +117,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: { status: 'CANCELLED' },
     });
@@ -127,10 +127,10 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
 
   async getQueueStats() {
     const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
+      this.prisma.scanJob.count({ where: { status: 'QUEUED' } }),
+      this.prisma.scanJob.count({ where: { status: 'PROCESSING' } }),
+      this.prisma.scanJob.count({ where: { status: 'COMPLETED' } }),
+      this.prisma.scanJob.count({ where: { status: 'FAILED' } }),
     ]);
 
     return {
@@ -144,14 +144,14 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
 
     if (!job || job.status !== 'QUEUED') return 0;
 
     // Count jobs ahead in queue (higher priority or earlier queued)
-    const ahead = await (this.prisma as any).scanJob.count({
+    const ahead = await this.prisma.scanJob.count({
       where: {
         status: 'QUEUED',
         OR: [
@@ -174,7 +174,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Check how many jobs are currently processing
-    const processingCount = await (this.prisma as any).scanJob.count({
+    const processingCount = await this.prisma.scanJob.count({
       where: { status: 'PROCESSING' },
     });
 
@@ -183,7 +183,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Get next job from queue (highest priority, oldest first)
-    const nextJob = await (this.prisma as any).scanJob.findFirst({
+    const nextJob = await this.prisma.scanJob.findFirst({
       where: { status: 'QUEUED' },
       orderBy: [
         { priority: 'desc' },
@@ -212,7 +212,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Starting job ${job.id} for ${job.websiteUrl}`);
 
     // Mark as processing
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: job.id },
       data: {
         status: 'PROCESSING',
@@ -235,7 +235,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
       const reportId = await this.reportService.saveScanResult(result, job.auditRequestId);
 
       // Mark as completed
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: job.id },
         data: {
           status: 'COMPLETED',
@@ -252,7 +252,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Job ${job.id} failed: ${error.message}`);
 
       // Mark as failed
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: job.id },
         data: {
           status: 'FAILED',
@@ -265,7 +265,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async updateJobProgress(jobId: string, progress: number, step: string) {
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: { progress, currentStep: step },
     });

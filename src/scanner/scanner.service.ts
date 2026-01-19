@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { chromium, Browser, Page, Request } from 'playwright';
 import { CookieAnalyzer } from './analyzers/cookie.analyzer';
 import { TrackerAnalyzer } from './analyzers/tracker.analyzer';
@@ -22,9 +22,10 @@ import {
 } from './dto/scan-result.dto';
 
 @Injectable()
-export class ScannerService {
+export class ScannerService implements OnModuleDestroy {
   private readonly logger = new Logger(ScannerService.name);
   private browser: Browser | null = null;
+  private browserPromise: Promise<Browser> | null = null;
 
   private readonly cookieAnalyzer = new CookieAnalyzer();
   private readonly trackerAnalyzer = new TrackerAnalyzer();
@@ -42,15 +43,21 @@ export class ScannerService {
     // Normalize URL
     const normalizedUrl = this.normalizeUrl(url);
 
-    // Initialize browser
+    // Initialize browser with race condition protection
     if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      if (!this.browserPromise) {
+        this.browserPromise = chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        }).then(browser => {
+          this.browser = browser;
+          return browser;
+        });
+      }
+      await this.browserPromise;
     }
 
-    const context = await this.browser.newContext({
+    const context = await this.browser!.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
     });
@@ -156,7 +163,12 @@ export class ScannerService {
       // Phase 5: Privacy Policy content analysis
       if (privacyPolicy.found && privacyPolicy.url) {
         this.logger.log('Phase 5: Privacy Policy content analysis...');
-        privacyPolicy.content = await this.privacyPolicyAnalyzer.analyzePrivacyPolicyContent(page, privacyPolicy.url);
+        const ppPage = await context.newPage();
+        try {
+          privacyPolicy.content = await this.privacyPolicyAnalyzer.analyzePrivacyPolicyContent(ppPage, privacyPolicy.url);
+        } finally {
+          await ppPage.close();
+        }
       }
 
       // Phase 6: Data Transfer analysis
