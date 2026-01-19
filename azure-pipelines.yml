@@ -257,8 +257,8 @@ stages:
                       
                       echo "=== Starting DEV deployment ==="
                       
-                      # Create .env from Azure DevOps secrets
-                      cat > .env << ENV_FILE
+                      # Create DEV env file from Azure DevOps secrets
+                      cat > .env.development << ENV_FILE
                     POSTGRES_USER=$(POSTGRES_USER)
                     POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
                     POSTGRES_DB=$(POSTGRES_DB)
@@ -268,9 +268,9 @@ stages:
                     NODE_ENV=development
                     ENV_FILE
                       
-                      docker-compose down --remove-orphans || true
-                      docker-compose build --no-cache --pull
-                      docker-compose up -d
+                      docker-compose --env-file .env.development down --remove-orphans || true
+                      docker-compose --env-file .env.development build --no-cache --pull
+                      docker-compose --env-file .env.development up -d
                       
                       # Wait for health check
                       for i in {1..30}; do
@@ -333,8 +333,8 @@ stages:
                       
                       echo "=== Starting PROD deployment ==="
                       
-                      # Create .env from Azure DevOps secrets
-                      cat > .env << ENV_FILE
+                      # Create PROD env file from Azure DevOps secrets
+                      cat > .env.production << ENV_FILE
                     POSTGRES_USER=$(POSTGRES_USER)
                     POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
                     POSTGRES_DB=$(POSTGRES_DB)
@@ -344,9 +344,9 @@ stages:
                     NODE_ENV=production
                     ENV_FILE
                       
-                      docker-compose down --remove-orphans || true
-                      docker-compose build --no-cache --pull
-                      docker-compose up -d
+                      docker-compose --env-file .env.production down --remove-orphans || true
+                      docker-compose --env-file .env.production build --no-cache --pull
+                      docker-compose --env-file .env.production up -d
                       
                       # Wait for health check
                       for i in {1..30}; do
