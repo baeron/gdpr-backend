@@ -263,15 +263,15 @@ stages:
                       echo "=== Starting DEV deployment ==="
                       
                       # Create DEV env file from Azure DevOps secrets
-                      cat > .env.devprod << ENV_FILE
-                    POSTGRES_USER=$(POSTGRES_USER)
-                    POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
-                    POSTGRES_DB=$(POSTGRES_DB)
-                    RESEND_API_KEY=$(RESEND_API_KEY)
-                    STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)
-                    STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)
-                    NODE_ENV=development
-                    ENV_FILE
+                      printf '%s\n' \
+                        "POSTGRES_USER=$(POSTGRES_USER)" \
+                        "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
+                        "POSTGRES_DB=$(POSTGRES_DB)" \
+                        "RESEND_API_KEY=$(RESEND_API_KEY)" \
+                        "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
+                        "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
+                        "NODE_ENV=development" \
+                        > .env.devprod
 
                       # Ensure postgres is running for dev API
                       docker-compose --env-file .env.production up -d postgres
@@ -368,15 +368,15 @@ stages:
                       echo "=== Starting PROD deployment ==="
                       
                       # Create PROD env file from Azure DevOps secrets
-                      cat > .env.production << ENV_FILE
-                    POSTGRES_USER=$(POSTGRES_USER)
-                    POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
-                    POSTGRES_DB=$(POSTGRES_DB)
-                    RESEND_API_KEY=$(RESEND_API_KEY)
-                    STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)
-                    STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)
-                    NODE_ENV=production
-                    ENV_FILE
+                      printf '%s\n' \
+                        "POSTGRES_USER=$(POSTGRES_USER)" \
+                        "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
+                        "POSTGRES_DB=$(POSTGRES_DB)" \
+                        "RESEND_API_KEY=$(RESEND_API_KEY)" \
+                        "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
+                        "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
+                        "NODE_ENV=production" \
+                        > .env.production
                       
                       docker-compose --env-file .env.production down --remove-orphans || true
                       docker-compose --env-file .env.production build --no-cache --pull
