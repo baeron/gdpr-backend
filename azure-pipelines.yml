@@ -258,7 +258,7 @@ stages:
                       echo "=== Starting DEV deployment ==="
                       
                       # Create DEV env file from Azure DevOps secrets
-                      cat > .env.development << ENV_FILE
+                      cat > .env.devprod << ENV_FILE
                     POSTGRES_USER=$(POSTGRES_USER)
                     POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)
                     POSTGRES_DB=$(POSTGRES_DB)
@@ -268,13 +268,13 @@ stages:
                     NODE_ENV=development
                     ENV_FILE
                       
-                      docker-compose --env-file .env.development down --remove-orphans || true
-                      docker-compose --env-file .env.development build --no-cache --pull
-                      docker-compose --env-file .env.development up -d
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml down --remove-orphans || true
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
                       
                       # Wait for health check
                       for i in {1..30}; do
-                        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+                        if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
                           echo "Health check passed!"
                           break
                         fi
@@ -282,7 +282,7 @@ stages:
                         sleep 2
                       done
                       
-                      curl -f http://localhost:3000/api/health || exit 1
+                      curl -f http://localhost:3001/api/health || exit 1
                       echo "=== DEV Deployment successful! ==="
                     DEPLOY_SCRIPT
                   displayName: 'Deploy to DEV'
