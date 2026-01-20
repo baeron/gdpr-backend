@@ -17,8 +17,8 @@ export class PaymentService {
   // A/B test pricing variants by region
   private readonly pricingByRegion: Record<string, { A: number; B: number }> = {
     EU: { A: 100, B: 100 }, // €29 vs €49
-    US: { A: 2900, B: 4900 }, // $29 vs $49
-    UK: { A: 2400, B: 3900 }, // £24 vs £39
+    US: { A: 100, B: 100 }, // $29 vs $49
+    UK: { A: 100, B: 100 }, // £24 vs £39
     DEFAULT: { A: 100, B: 100 },
   };
 
