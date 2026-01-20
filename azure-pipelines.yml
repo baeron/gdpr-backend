@@ -1,6 +1,11 @@
 # Azure Pipelines CI/CD for NestJS Backend
 # GDPR Audit Backend API
 
+parameters:
+  - name: runProdOnly
+    type: boolean
+    default: false
+
 trigger:
   branches:
     include:
@@ -309,7 +314,11 @@ stages:
   - stage: DeployProd
     displayName: 'Deploy to PROD'
     dependsOn: DeployDev
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    condition: >
+      or(
+        eq(${{ parameters.runProdOnly }}, true),
+        and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+      )
     variables:
       - group: vultr-deployment
       - group: gdpr-secrets-prod
