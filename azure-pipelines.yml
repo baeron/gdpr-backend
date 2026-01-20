@@ -267,6 +267,22 @@ stages:
                     STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)
                     NODE_ENV=development
                     ENV_FILE
+
+                      # Ensure postgres is running for dev API
+                      docker-compose --env-file .env.production up -d postgres
+                      for i in {1..30}; do
+                        status=$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)
+                        if [ "$status" = "healthy" ]; then
+                          echo "Postgres is healthy."
+                          break
+                        fi
+                        echo "Waiting for postgres... ($i/30)"
+                        sleep 2
+                      done
+                      if [ "$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)" != "healthy" ]; then
+                        echo "Postgres is not healthy."
+                        exit 1
+                      fi
                       
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml down --remove-orphans || true
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
