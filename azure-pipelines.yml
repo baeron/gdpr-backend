@@ -293,17 +293,24 @@ stages:
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
                       
-                      # Wait for health check
-                      for i in {1..30}; do
-                        if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
-                          echo "Health check passed!"
+                      # Wait for container health (more reliable than early curl)
+                      for i in {1..60}; do
+                        status=$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)
+                        if [ "$status" = "healthy" ]; then
+                          echo "Dev API container is healthy."
                           break
                         fi
-                        echo "Waiting... ($i/30)"
+                        echo "Waiting for dev API... ($i/60)"
                         sleep 2
                       done
-                      
-                      curl -f http://localhost:3001/api/health || exit 1
+
+                      if [ "$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)" != "healthy" ]; then
+                        echo "Dev API did not become healthy."
+                        docker logs --tail=200 gdpr-api-dev || true
+                        exit 1
+                      fi
+
+                      curl -f http://localhost:3001/api/health
                       echo "=== DEV Deployment successful! ==="
                     DEPLOY_SCRIPT
                   displayName: 'Deploy to DEV'
