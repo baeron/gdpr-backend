@@ -275,6 +275,8 @@ stages:
 
                       # Ensure postgres is running for dev API
                       docker-compose --env-file .env.production up -d postgres
+                      docker network inspect gdpr-backend_default >/dev/null 2>&1 || docker network create gdpr-backend_default
+                      docker network connect gdpr-backend_default gdpr-postgres >/dev/null 2>&1 || true
                       for i in {1..30}; do
                         status=$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)
                         if [ "$status" = "healthy" ]; then
