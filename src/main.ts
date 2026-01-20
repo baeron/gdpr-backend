@@ -46,6 +46,8 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
     'http://localhost:4200',
     'https://policytracker.eu',
     'https://www.policytracker.eu',
+    'https://dev.policytracker.eu',
+    'https://www.dev.policytracker.eu',
   ];
 
   app.enableCors({
