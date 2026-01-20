@@ -48,6 +48,8 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
     'https://www.policytracker.eu',
     'https://dev.policytracker.eu',
     'https://www.dev.policytracker.eu',
+    'https://api.policytracker.eu',
+    'https://api.dev.policytracker.eu',
   ];
 
   app.enableCors({
