@@ -7,6 +7,7 @@ import { AuditModule } from './audit/audit.module';
 import { EmailModule } from './email/email.module';
 import { ScannerModule } from './scanner/scanner.module';
 import { PaymentModule } from './payment/payment.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PaymentModule } from './payment/payment.module';
     AuditModule,
     ScannerModule,
     PaymentModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

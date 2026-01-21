@@ -1,0 +1,36 @@
+1. chech redis/bullMQ does it work?
+2. loading stress test - hove many analytics we can support per one time for 1 core/ 1 gb Ram for Postgress solution and Redis/bullMQ solution
+3. we need to suuport SemVer for our product - aditional manual pipeline which inkrise our magor/minor/patch version
+4. each magor and minor version shold have artifact for bouth FrontEnd/ frontEnd (change version in AppService)
+5. need to fink about DB is it has backUp
+6. finalize multilanguage
+7. check database when we already have fikd with website which we call/ return result
+8. email - finalize email sending from correct adress
+9. cleanUp code (split files to html/ts/scss/spec files)
+10. fix linter issue
+11. create favicone
+12. nginx settings for A/B testing
+13. chech real payment for 1$ and refund
+14. check is it important for SEO have a blog with articles about GDPR
+theck is SEO in page should be in curent language or just general, for example english
+15. update robot.txt and sitemap to new DOMEN name
+16. start development our custom user analitic servise with DB writing
+17. cleanUp google analitic usege
+18. check how many pages on one fesorse we can chech by deep diving (5-10-20)
+19. i dont know what is prisma - update my knolage
+20. check LOW on which language shold be CookieBanner
+21. saplit env files for dev and product
+22. expend curent domen to sub domen like DEV for testing in real time
+23. refactoring scaner service by spliting to some smoler pices which will support OCP and SPP principle, check DI prinseple
+24. scaner report service is hardCoded - check what will be the better
+25. add notification if server is DOWN or has some problem with querry
+26. create a template for e-mail with short analisis with PDF file and link for buing full report (save in DB which price we provide for user)
+27. analize how we can start sell our product without marketing budget on first time
+28. Double check UX/UI with our Comet browser (check AI solution, mayme something present on the market)
+29. do we use cookie or Local/Sesion storage in our app, if not how we can inprove our app by using it
+30. check WCAG 2.1ab - automate it pipeline job report
+// 
+1. check does it works     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+2. check code base where we use NETLIFY, cleanup dependence and codeBase
+
+ssh -i ~/.ssh/id_ed25519_gdpr deploy@45.63.119.28 

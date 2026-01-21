@@ -24,11 +24,4 @@ describe('AppController', () => {
     });
   });
 
-  describe('health', () => {
-    it('should return health status', () => {
-      const result = appController.getHealth();
-      expect(result.status).toBe('ok');
-      expect(result.timestamp).toBeDefined();
-    });
-  });
 });
