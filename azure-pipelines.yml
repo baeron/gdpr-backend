@@ -291,7 +291,9 @@ stages:
                         exit 1
                       fi
                       
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml down --remove-orphans || true
+                      # Stop only dev API container, not postgres
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml stop api-dev || true
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml rm -f api-dev || true
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
                       
@@ -378,7 +380,9 @@ stages:
                         "NODE_ENV=production" \
                         > .env.production
                       
-                      docker-compose --env-file .env.production down --remove-orphans || true
+                      # Stop only prod API container, keep postgres running
+                      docker-compose --env-file .env.production stop api || true
+                      docker-compose --env-file .env.production rm -f api || true
                       docker-compose --env-file .env.production build --no-cache --pull
                       docker-compose --env-file .env.production up -d
                       
