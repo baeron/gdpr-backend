@@ -3,6 +3,9 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppController } from './../src/app.controller';
 import { AppService } from './../src/app.service';
+import { HealthController } from './../src/health/health.controller';
+import { HealthService } from './../src/health/health.service';
+import { PrismaService } from './../src/prisma/prisma.service';
 
 interface HealthResponse {
   status: string;
@@ -14,8 +17,17 @@ describe('AppController (e2e)', () => {
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      controllers: [AppController],
-      providers: [AppService],
+      controllers: [AppController, HealthController],
+      providers: [
+        AppService,
+        HealthService,
+        {
+          provide: PrismaService,
+          useValue: {
+            $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+          },
+        },
+      ],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -35,7 +47,7 @@ describe('AppController (e2e)', () => {
       .get('/health')
       .expect(200)
       .expect((res: { body: HealthResponse }) => {
-        expect(res.body.status).toBe('ok');
+        expect(res.body.status).toBe('healthy');
         expect(res.body.timestamp).toBeDefined();
       });
   });
