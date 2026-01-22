@@ -23,7 +23,32 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+GDPR Audit Backend - API сервер для анализа веб-сайтов на соответствие GDPR.
+
+## Queue System
+
+Проект поддерживает два типа очередей для обработки сканирований:
+
+### PostgreSQL Queue (по умолчанию)
+- Использует базу данных PostgreSQL для хранения задач
+- Не требует дополнительных сервисов
+- Подходит для небольших нагрузок
+
+### Redis/BullMQ Queue
+- Использует Redis и BullMQ для высокопроизводительной очереди
+- Рекомендуется для production с высокой нагрузкой
+- Включается через параметр `enableRedis=true` в Azure DevOps pipeline
+
+**Переменные окружения:**
+```bash
+QUEUE_TYPE=postgres|redis  # Тип очереди (по умолчанию: postgres)
+REDIS_URL=redis://localhost:6379  # URL Redis сервера (только для redis)
+WORKER_CONCURRENCY=1  # Количество параллельных обработчиков
+```
+
+**Docker Compose профили:**
+- `postgres` - API с PostgreSQL очередью
+- `redis` - API с Redis/BullMQ очередью
 
 ## Project setup
 
