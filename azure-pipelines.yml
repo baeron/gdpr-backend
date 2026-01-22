@@ -5,6 +5,10 @@ parameters:
   - name: runProdOnly
     type: boolean
     default: false
+  - name: enableRedis
+    type: boolean
+    default: false
+    displayName: 'Enable Redis/BullMQ queue (requires more RAM)'
 
 trigger:
   branches:
@@ -23,10 +27,13 @@ pr:
 variables:
   nodeVersion: '20.x'
   npmCacheFolder: $(Pipeline.Workspace)/.npm
-  # Queue configuration: 'postgres' (default, no Redis) or 'redis' (requires more RAM)
-  queueType: 'postgres'
-  # Docker Compose profile: '' (default), 'redis', or 'scaled'
-  dockerProfile: ''
+  # Queue configuration based on parameter
+  ${{ if eq(parameters.enableRedis, true) }}:
+    queueType: 'redis'
+    dockerProfile: 'redis'
+  ${{ else }}:
+    queueType: 'postgres'
+    dockerProfile: ''
 
 stages:
   # ============================================
@@ -256,11 +263,16 @@ stages:
                   displayName: 'Copy files to server'
 
                 - script: |
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'DEPLOY_SCRIPT'
+                    QUEUE_TYPE="$(queueType)"
+                    DOCKER_PROFILE="$(dockerProfile)"
+                    
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
                       set -e
                       cd /opt/gdpr-backend
                       
                       echo "=== Starting DEV deployment ==="
+                      echo "Queue type: ${QUEUE_TYPE}"
+                      echo "Docker profile: ${DOCKER_PROFILE:-none}"
                       
                       # Create DEV env file from Azure DevOps secrets
                       printf '%s\n' \
@@ -271,6 +283,7 @@ stages:
                         "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
                         "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
                         "NODE_ENV=development" \
+                        "QUEUE_TYPE=${QUEUE_TYPE}" \
                         > .env.devprod
 
                       # Ensure postgres is running for dev API
@@ -278,37 +291,45 @@ stages:
                       docker network inspect gdpr-backend_default >/dev/null 2>&1 || docker network create gdpr-backend_default
                       docker network connect gdpr-backend_default gdpr-postgres >/dev/null 2>&1 || true
                       for i in {1..30}; do
-                        status=$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)
-                        if [ "$status" = "healthy" ]; then
+                        status=\$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)
+                        if [ "\$status" = "healthy" ]; then
                           echo "Postgres is healthy."
                           break
                         fi
-                        echo "Waiting for postgres... ($i/30)"
+                        echo "Waiting for postgres... (\$i/30)"
                         sleep 2
                       done
-                      if [ "$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)" != "healthy" ]; then
+                      if [ "\$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)" != "healthy" ]; then
                         echo "Postgres is not healthy."
                         exit 1
                       fi
                       
-                      # Stop only dev API container, not postgres
+                      # Stop dev containers
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml stop api-dev || true
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml rm -f api-dev || true
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
                       
-                      # Wait for container health (more reliable than early curl)
+                      # Build and start with optional Redis profile
+                      if [ -n "${DOCKER_PROFILE}" ]; then
+                        echo "Starting with profile: ${DOCKER_PROFILE}"
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile ${DOCKER_PROFILE} build --no-cache --pull
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile ${DOCKER_PROFILE} up -d
+                      else
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
+                      fi
+                      
+                      # Wait for container health
                       for i in {1..60}; do
-                        status=$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)
-                        if [ "$status" = "healthy" ]; then
+                        status=\$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)
+                        if [ "\$status" = "healthy" ]; then
                           echo "Dev API container is healthy."
                           break
                         fi
-                        echo "Waiting for dev API... ($i/60)"
+                        echo "Waiting for dev API... (\$i/60)"
                         sleep 2
                       done
 
-                      if [ "$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)" != "healthy" ]; then
+                      if [ "\$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)" != "healthy" ]; then
                         echo "Dev API did not become healthy."
                         docker logs --tail=200 gdpr-api-dev || true
                         exit 1
@@ -363,11 +384,16 @@ stages:
                   displayName: 'Copy files to server'
 
                 - script: |
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'DEPLOY_SCRIPT'
+                    QUEUE_TYPE="$(queueType)"
+                    DOCKER_PROFILE="$(dockerProfile)"
+                    
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
                       set -e
                       cd /opt/gdpr-backend
                       
                       echo "=== Starting PROD deployment ==="
+                      echo "Queue type: ${QUEUE_TYPE}"
+                      echo "Docker profile: ${DOCKER_PROFILE:-none}"
                       
                       # Create PROD env file from Azure DevOps secrets
                       printf '%s\n' \
@@ -378,13 +404,22 @@ stages:
                         "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
                         "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
                         "NODE_ENV=production" \
+                        "QUEUE_TYPE=${QUEUE_TYPE}" \
                         > .env.production
                       
                       # Stop only prod API container, keep postgres running
                       docker-compose --env-file .env.production stop api || true
                       docker-compose --env-file .env.production rm -f api || true
-                      docker-compose --env-file .env.production build --no-cache --pull
-                      docker-compose --env-file .env.production up -d
+                      
+                      # Build and start with optional Redis profile
+                      if [ -n "${DOCKER_PROFILE}" ]; then
+                        echo "Starting with profile: ${DOCKER_PROFILE}"
+                        docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} build --no-cache --pull
+                        docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} up -d
+                      else
+                        docker-compose --env-file .env.production build --no-cache --pull
+                        docker-compose --env-file .env.production up -d
+                      fi
                       
                       # Wait for health check
                       for i in {1..30}; do
@@ -392,7 +427,7 @@ stages:
                           echo "Health check passed!"
                           break
                         fi
-                        echo "Waiting... ($i/30)"
+                        echo "Waiting... (\$i/30)"
                         sleep 2
                       done
                       

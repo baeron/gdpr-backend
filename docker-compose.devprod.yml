@@ -1,6 +1,33 @@
 version: '3.8'
 
+# DEV environment docker-compose
+# Supports both PostgreSQL queue (default) and Redis/BullMQ queue
+#
+# Usage:
+#   PostgreSQL queue (default):
+#     docker-compose -f docker-compose.devprod.yml up -d
+#
+#   Redis queue:
+#     docker-compose -f docker-compose.devprod.yml --profile redis up -d
+
 services:
+  # Redis for BullMQ (optional, only with --profile redis)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: gdpr-redis-dev
+    restart: unless-stopped
+    profiles: ["redis"]
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6380:6379"
+    networks:
+      - gdpr-backend_default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api-dev:
     build:
       context: .
@@ -14,12 +41,19 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      QUEUE_TYPE: postgres
+      QUEUE_TYPE: ${QUEUE_TYPE:-postgres}
+      REDIS_URL: redis://gdpr-redis-dev:6379
       WORKER_ENABLED: "true"
     ports:
       - "127.0.0.1:3001:3000"
     networks:
       - gdpr-backend_default
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     command: >
       sh -c "
         npx prisma migrate deploy &&
