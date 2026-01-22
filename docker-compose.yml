@@ -109,6 +109,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
       PORT: 3000
       RESEND_API_KEY: ${RESEND_API_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
       WORKER_ENABLED: "true"
