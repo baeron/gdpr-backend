@@ -33,7 +33,7 @@ variables:
     dockerProfile: 'redis'
   ${{ else }}:
     queueType: 'postgres'
-    dockerProfile: ''
+    dockerProfile: 'postgres'
 
 stages:
   # ============================================
@@ -304,15 +304,17 @@ stages:
                         exit 1
                       fi
                       
-                      # Stop dev containers
+                      # Stop dev containers (api-dev doesn't have profiles, just stop it)
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml stop api-dev || true
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml rm -f api-dev || true
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis stop redis-dev || true
+                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis rm -f redis-dev || true
                       
-                      # Build and start with optional Redis profile
-                      if [ -n "${DOCKER_PROFILE}" ]; then
-                        echo "Starting with profile: ${DOCKER_PROFILE}"
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile ${DOCKER_PROFILE} build --no-cache --pull
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile ${DOCKER_PROFILE} up -d
+                      # Build and start with selected profile (redis profile adds redis-dev container)
+                      echo "Starting DEV with profile: ${DOCKER_PROFILE}"
+                      if [ "${DOCKER_PROFILE}" = "redis" ]; then
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis build --no-cache --pull
+                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis up -d
                       else
                         docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
                         docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
@@ -407,19 +409,16 @@ stages:
                         "QUEUE_TYPE=${QUEUE_TYPE}" \
                         > .env.production
                       
-                      # Stop only prod API container, keep postgres running
-                      docker-compose --env-file .env.production stop api || true
-                      docker-compose --env-file .env.production rm -f api || true
+                      # Stop API containers (both postgres and redis variants)
+                      docker-compose --env-file .env.production --profile postgres stop api || true
+                      docker-compose --env-file .env.production --profile postgres rm -f api || true
+                      docker-compose --env-file .env.production --profile redis stop api-redis || true
+                      docker-compose --env-file .env.production --profile redis rm -f api-redis || true
                       
-                      # Build and start with optional Redis profile
-                      if [ -n "${DOCKER_PROFILE}" ]; then
-                        echo "Starting with profile: ${DOCKER_PROFILE}"
-                        docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} build --no-cache --pull
-                        docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} up -d
-                      else
-                        docker-compose --env-file .env.production build --no-cache --pull
-                        docker-compose --env-file .env.production up -d
-                      fi
+                      # Build and start with selected profile
+                      echo "Starting with profile: ${DOCKER_PROFILE}"
+                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} build --no-cache --pull
+                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} up -d
                       
                       # Wait for health check
                       for i in {1..30}; do

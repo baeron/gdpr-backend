@@ -58,13 +58,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # ==================== API SERVER ====================
+  # ==================== API SERVER (PostgreSQL queue) ====================
+  # Use this when NOT using Redis: docker-compose up -d
+  # When using Redis, use --profile redis instead
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: gdpr-api
     restart: unless-stopped
+    profiles: ["default", "postgres"]
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
