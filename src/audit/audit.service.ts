@@ -36,15 +36,14 @@ export class AuditService {
         `Audit request created: ${auditRequest.id} for ${websiteUrl}`,
       );
 
-      // Send confirmation email to user
-      await this.emailService.sendAuditConfirmation({
-        to: auditRequest.email,
+      // Send confirmation email to user (using new template system)
+      await this.emailService.sendAuditConfirmationTo(auditRequest.email, {
         websiteUrl: auditRequest.websiteUrl,
         auditId: auditRequest.id,
         locale: auditRequest.locale,
       });
 
-      // Send notification to admin
+      // Send notification to admin (with additional metadata)
       await this.emailService.sendAdminNotification({
         auditId: auditRequest.id,
         websiteUrl: auditRequest.websiteUrl,
