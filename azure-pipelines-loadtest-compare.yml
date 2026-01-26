@@ -33,11 +33,18 @@ parameters:
 
 variables:
   - group: vultr-deployment
-  - ${{ if eq(parameters.environment, 'dev') }}:
-      baseUrl: 'https://dev.api.policytracker.eu'
-      apiContainer: 'gdpr-api-dev'
-      composeFile: 'docker-compose.devprod.yml'
-      envFile: '.env.devprod'
+  - name: baseUrl
+    ${{ if eq(parameters.environment, 'dev') }}:
+      value: 'https://dev.api.policytracker.eu'
+  - name: apiContainer
+    ${{ if eq(parameters.environment, 'dev') }}:
+      value: 'gdpr-api-dev'
+  - name: composeFile
+    ${{ if eq(parameters.environment, 'dev') }}:
+      value: 'docker-compose.devprod.yml'
+  - name: envFile
+    ${{ if eq(parameters.environment, 'dev') }}:
+      value: '.env.devprod'
 
 pool:
   vmImage: 'ubuntu-latest'
