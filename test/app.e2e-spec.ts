@@ -6,6 +6,7 @@ import { AppService } from './../src/app.service';
 import { HealthController } from './../src/health/health.controller';
 import { HealthService } from './../src/health/health.service';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { QUEUE_SERVICE } from './../src/scanner/queue/queue.interface';
 
 interface HealthResponse {
   status: string;
@@ -25,6 +26,20 @@ describe('AppController (e2e)', () => {
           provide: PrismaService,
           useValue: {
             $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+          },
+        },
+        {
+          provide: QUEUE_SERVICE,
+          useValue: {
+            getStats: jest.fn().mockResolvedValue({
+              waiting: 0,
+              active: 0,
+              completed: 0,
+              failed: 0,
+            }),
+            addJob: jest.fn(),
+            getJob: jest.fn(),
+            processJobs: jest.fn(),
           },
         },
       ],
