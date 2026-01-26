@@ -127,8 +127,14 @@ describe('PostgresQueueService', () => {
     });
 
     it('should use provided priority', async () => {
-      (prismaService as any).scanJob.create.mockResolvedValue({ ...mockJob, priority: 5 });
-      (prismaService as any).scanJob.findUnique.mockResolvedValue({ ...mockJob, priority: 5 });
+      (prismaService as any).scanJob.create.mockResolvedValue({
+        ...mockJob,
+        priority: 5,
+      });
+      (prismaService as any).scanJob.findUnique.mockResolvedValue({
+        ...mockJob,
+        priority: 5,
+      });
       (prismaService as any).scanJob.count.mockResolvedValue(0);
 
       await service.addJob({ websiteUrl: 'https://example.com', priority: 5 });
@@ -185,7 +191,10 @@ describe('PostgresQueueService', () => {
   describe('cancelJob', () => {
     it('should cancel a queued job', async () => {
       (prismaService as any).scanJob.findUnique.mockResolvedValue(mockJob);
-      (prismaService as any).scanJob.update.mockResolvedValue({ ...mockJob, status: 'CANCELLED' });
+      (prismaService as any).scanJob.update.mockResolvedValue({
+        ...mockJob,
+        status: 'CANCELLED',
+      });
 
       const result = await service.cancelJob('job-123');
 
@@ -207,7 +216,9 @@ describe('PostgresQueueService', () => {
 
     it('should return false when job is not queued', async () => {
       const processingJob = { ...mockJob, status: 'PROCESSING' };
-      (prismaService as any).scanJob.findUnique.mockResolvedValue(processingJob);
+      (prismaService as any).scanJob.findUnique.mockResolvedValue(
+        processingJob,
+      );
 
       const result = await service.cancelJob('job-123');
 
@@ -228,10 +239,10 @@ describe('PostgresQueueService', () => {
   describe('getStats', () => {
     it('should return queue statistics', async () => {
       (prismaService as any).scanJob.count
-        .mockResolvedValueOnce(5)  // queued
-        .mockResolvedValueOnce(1)  // processing
+        .mockResolvedValueOnce(5) // queued
+        .mockResolvedValueOnce(1) // processing
         .mockResolvedValueOnce(100) // completed
-        .mockResolvedValueOnce(3);  // failed
+        .mockResolvedValueOnce(3); // failed
 
       const result = await service.getStats();
 
@@ -286,7 +297,11 @@ describe('PostgresQueueService', () => {
     });
 
     it('should return null estimated wait for non-queued jobs', async () => {
-      const completedJob = { ...mockJob, status: 'COMPLETED', reportId: 'report-123' };
+      const completedJob = {
+        ...mockJob,
+        status: 'COMPLETED',
+        reportId: 'report-123',
+      };
       (prismaService as any).scanJob.findUnique.mockResolvedValue(completedJob);
 
       const result = await service.getJobStatus('job-123');

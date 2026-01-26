@@ -35,19 +35,19 @@ export interface QueueStats {
 export interface IQueueService {
   // Add job to queue
   addJob(job: QueuedJob): Promise<JobStatus>;
-  
+
   // Get job status
   getJobStatus(jobId: string): Promise<JobStatus | null>;
-  
+
   // Cancel job (only if queued)
   cancelJob(jobId: string): Promise<boolean>;
-  
+
   // Get queue statistics
   getStats(): Promise<QueueStats>;
-  
+
   // Start processing jobs (called on module init)
   startWorker(): void;
-  
+
   // Stop processing jobs (called on module destroy)
   stopWorker(): void;
 }

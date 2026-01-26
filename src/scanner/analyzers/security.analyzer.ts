@@ -31,10 +31,13 @@ const THIRTEEN_MONTHS_MS = 13 * 30 * 24 * 60 * 60 * 1000; // ~13 months in milli
 export class SecurityAnalyzer {
   private mixedContentResources: string[] = [];
 
-  async analyzeHttps(page: Page, originalUrl: string): Promise<SecurityInfo['https']> {
+  async analyzeHttps(
+    page: Page,
+    originalUrl: string,
+  ): Promise<SecurityInfo['https']> {
     const currentUrl = page.url();
     const isHttps = currentUrl.startsWith('https://');
-    
+
     // Check if HTTP redirects to HTTPS
     let redirectsToHttps = false;
     if (originalUrl.startsWith('http://')) {
@@ -54,7 +57,17 @@ export class SecurityAnalyzer {
     if (url.startsWith('http://') && !url.includes('localhost')) {
       // Exclude certain resource types that browsers might handle differently
       const resourceType = request.resourceType();
-      if (['document', 'script', 'stylesheet', 'image', 'font', 'xhr', 'fetch'].includes(resourceType)) {
+      if (
+        [
+          'document',
+          'script',
+          'stylesheet',
+          'image',
+          'font',
+          'xhr',
+          'fetch',
+        ].includes(resourceType)
+      ) {
         this.mixedContentResources.push(url);
       }
     }
@@ -93,7 +106,8 @@ export class SecurityAnalyzer {
             cookieName: cookie.name,
             issue: 'no_secure',
             description: `Cookie "${cookie.name}" is missing the Secure flag`,
-            recommendation: 'Add the Secure flag to ensure the cookie is only sent over HTTPS',
+            recommendation:
+              'Add the Secure flag to ensure the cookie is only sent over HTTPS',
           });
         }
       }
@@ -107,7 +121,8 @@ export class SecurityAnalyzer {
             cookieName: cookie.name,
             issue: 'no_httponly',
             description: `Cookie "${cookie.name}" is missing the HttpOnly flag`,
-            recommendation: 'Add the HttpOnly flag to prevent JavaScript access to this cookie',
+            recommendation:
+              'Add the HttpOnly flag to prevent JavaScript access to this cookie',
           });
         }
       }
@@ -120,7 +135,8 @@ export class SecurityAnalyzer {
             cookieName: cookie.name,
             issue: 'no_samesite',
             description: `Cookie "${cookie.name}" has SameSite=None without Secure flag`,
-            recommendation: 'Cookies with SameSite=None must also have the Secure flag',
+            recommendation:
+              'Cookies with SameSite=None must also have the Secure flag',
           });
         }
       }
@@ -129,15 +145,18 @@ export class SecurityAnalyzer {
       if (cookie.expires) {
         const expiresAt = new Date(cookie.expires).getTime();
         const lifetime = expiresAt - now;
-        
+
         if (lifetime > THIRTEEN_MONTHS_MS) {
           excessiveExpiration++;
-          const monthsRemaining = Math.round(lifetime / (30 * 24 * 60 * 60 * 1000));
+          const monthsRemaining = Math.round(
+            lifetime / (30 * 24 * 60 * 60 * 1000),
+          );
           issues.push({
             cookieName: cookie.name,
             issue: 'excessive_expiration',
             description: `Cookie "${cookie.name}" expires in ${monthsRemaining} months (max recommended: 13)`,
-            recommendation: 'Reduce cookie lifetime to maximum 13 months as per CNIL guidelines',
+            recommendation:
+              'Reduce cookie lifetime to maximum 13 months as per CNIL guidelines',
           });
         }
       }
@@ -163,6 +182,6 @@ export class SecurityAnalyzer {
       /user/i,
       /account/i,
     ];
-    return sensitivePatterns.some(pattern => pattern.test(name));
+    return sensitivePatterns.some((pattern) => pattern.test(name));
   }
 }

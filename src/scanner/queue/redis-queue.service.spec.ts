@@ -90,7 +90,7 @@ describe('RedisQueueService', () => {
     mockQueueClose.mockReset();
     mockWorkerClose.mockReset();
     mockWorkerOn.mockReset();
-    
+
     // Restore REDIS_URL
     if (originalRedisUrl !== undefined) {
       process.env.REDIS_URL = originalRedisUrl;
@@ -103,11 +103,11 @@ describe('RedisQueueService', () => {
     it('should use default Redis URL when not provided', () => {
       const originalEnv = process.env.REDIS_URL;
       delete process.env.REDIS_URL;
-      
+
       // Service is already created, check internal state via parseRedisUrl
       const parsed = (service as any).parseRedisUrl('redis://localhost:6379');
       expect(parsed).toEqual({ host: 'localhost', port: 6379 });
-      
+
       process.env.REDIS_URL = originalEnv;
     });
   });
@@ -119,7 +119,9 @@ describe('RedisQueueService', () => {
     });
 
     it('should parse Redis URL with custom port', () => {
-      const result = (service as any).parseRedisUrl('redis://redis-server:6380');
+      const result = (service as any).parseRedisUrl(
+        'redis://redis-server:6380',
+      );
       expect(result).toEqual({ host: 'redis-server', port: 6380 });
     });
 
@@ -129,7 +131,9 @@ describe('RedisQueueService', () => {
     });
 
     it('should handle IP addresses', () => {
-      const result = (service as any).parseRedisUrl('redis://192.168.1.100:6379');
+      const result = (service as any).parseRedisUrl(
+        'redis://192.168.1.100:6379',
+      );
       expect(result).toEqual({ host: '192.168.1.100', port: 6379 });
     });
   });
@@ -167,7 +171,9 @@ describe('RedisQueueService', () => {
 
     it('should not include position for processing jobs', async () => {
       const processingJob = { ...mockJob, status: 'PROCESSING' };
-      (prismaService as any).scanJob.findUnique.mockResolvedValue(processingJob);
+      (prismaService as any).scanJob.findUnique.mockResolvedValue(
+        processingJob,
+      );
 
       const result = await service.getJobStatus('job-123');
 
@@ -195,7 +201,9 @@ describe('RedisQueueService', () => {
 
     it('should return false when job is not queued', async () => {
       const processingJob = { ...mockJob, status: 'PROCESSING' };
-      (prismaService as any).scanJob.findUnique.mockResolvedValue(processingJob);
+      (prismaService as any).scanJob.findUnique.mockResolvedValue(
+        processingJob,
+      );
 
       const result = await service.cancelJob('job-123');
 
@@ -224,10 +232,10 @@ describe('RedisQueueService', () => {
   describe('getStats', () => {
     it('should return queue statistics', async () => {
       (prismaService as any).scanJob.count
-        .mockResolvedValueOnce(5)  // queued
-        .mockResolvedValueOnce(1)  // processing
+        .mockResolvedValueOnce(5) // queued
+        .mockResolvedValueOnce(1) // processing
         .mockResolvedValueOnce(100) // completed
-        .mockResolvedValueOnce(3);  // failed
+        .mockResolvedValueOnce(3); // failed
 
       const result = await service.getStats();
 
@@ -259,13 +267,13 @@ describe('RedisQueueService', () => {
     it('should use WORKER_CONCURRENCY env for maxConcurrent', async () => {
       const originalEnv = process.env.WORKER_CONCURRENCY;
       process.env.WORKER_CONCURRENCY = '3';
-      
+
       (prismaService as any).scanJob.count.mockResolvedValue(0);
 
       const result = await service.getStats();
 
       expect(result.maxConcurrent).toBe(3);
-      
+
       process.env.WORKER_CONCURRENCY = originalEnv;
     });
   });
@@ -282,13 +290,13 @@ describe('RedisQueueService', () => {
 
     it('should start worker and create queue', () => {
       service.startWorker();
-      
+
       expect((service as any).queue).toBeDefined();
     });
 
     it('should register event handlers on worker', () => {
       service.startWorker();
-      
+
       // Worker.on should be called for 'completed' and 'failed' events
       expect(mockWorkerOn).toHaveBeenCalled();
     });
@@ -296,7 +304,7 @@ describe('RedisQueueService', () => {
     it('should close queue and worker on stopWorker', () => {
       service.startWorker();
       service.stopWorker();
-      
+
       expect(mockQueueClose).toHaveBeenCalled();
       expect(mockWorkerClose).toHaveBeenCalled();
     });
@@ -333,7 +341,7 @@ describe('RedisQueueService', () => {
       expect(mockQueueAdd).toHaveBeenCalledWith(
         'scan',
         { jobId: 'job-123', websiteUrl: 'https://example.com' },
-        expect.any(Object)
+        expect.any(Object),
       );
     });
 
@@ -355,7 +363,9 @@ describe('RedisQueueService', () => {
     it('should use provided priority', async () => {
       const highPriorityJob = { ...mockJob, priority: 10 };
       (prismaService as any).scanJob.create.mockResolvedValue(highPriorityJob);
-      (prismaService as any).scanJob.findUnique.mockResolvedValue(highPriorityJob);
+      (prismaService as any).scanJob.findUnique.mockResolvedValue(
+        highPriorityJob,
+      );
       (prismaService as any).scanJob.count.mockResolvedValue(0);
       mockQueueAdd.mockResolvedValue({ id: 'bull-job-123' });
 
@@ -366,7 +376,7 @@ describe('RedisQueueService', () => {
         expect.any(Object),
         expect.objectContaining({
           priority: -10, // Bull uses negative for higher priority
-        })
+        }),
       );
     });
   });
@@ -379,7 +389,10 @@ describe('RedisQueueService', () => {
     it('should cancel queued job and remove from Bull queue', async () => {
       const mockBullJob = { remove: jest.fn().mockResolvedValue(undefined) };
       (prismaService as any).scanJob.findUnique.mockResolvedValue(mockJob);
-      (prismaService as any).scanJob.update.mockResolvedValue({ ...mockJob, status: 'CANCELLED' });
+      (prismaService as any).scanJob.update.mockResolvedValue({
+        ...mockJob,
+        status: 'CANCELLED',
+      });
       mockQueueGetJob.mockResolvedValue(mockBullJob);
 
       const result = await service.cancelJob('job-123');
@@ -395,7 +408,10 @@ describe('RedisQueueService', () => {
 
     it('should handle case when Bull job not found', async () => {
       (prismaService as any).scanJob.findUnique.mockResolvedValue(mockJob);
-      (prismaService as any).scanJob.update.mockResolvedValue({ ...mockJob, status: 'CANCELLED' });
+      (prismaService as any).scanJob.update.mockResolvedValue({
+        ...mockJob,
+        status: 'CANCELLED',
+      });
       mockQueueGetJob.mockResolvedValue(null);
 
       const result = await service.cancelJob('job-123');
@@ -434,7 +450,11 @@ describe('RedisQueueService', () => {
     });
 
     it('should return null estimated wait for completed jobs', async () => {
-      const completedJob = { ...mockJob, status: 'COMPLETED', reportId: 'report-123' };
+      const completedJob = {
+        ...mockJob,
+        status: 'COMPLETED',
+        reportId: 'report-123',
+      };
       (prismaService as any).scanJob.findUnique.mockResolvedValue(completedJob);
 
       const result = await service.getJobStatus('job-123');
@@ -444,7 +464,11 @@ describe('RedisQueueService', () => {
     });
 
     it('should include error message for failed jobs', async () => {
-      const failedJob = { ...mockJob, status: 'FAILED', error: 'Connection timeout' };
+      const failedJob = {
+        ...mockJob,
+        status: 'FAILED',
+        error: 'Connection timeout',
+      };
       (prismaService as any).scanJob.findUnique.mockResolvedValue(failedJob);
 
       const result = await service.getJobStatus('job-123');
@@ -457,7 +481,9 @@ describe('RedisQueueService', () => {
   describe('getQueuePosition', () => {
     it('should return 0 for non-queued jobs', async () => {
       const processingJob = { ...mockJob, status: 'PROCESSING' };
-      (prismaService as any).scanJob.findUnique.mockResolvedValue(processingJob);
+      (prismaService as any).scanJob.findUnique.mockResolvedValue(
+        processingJob,
+      );
 
       const result = await service.getJobStatus('job-123');
 
@@ -523,8 +549,12 @@ describe('RedisQueueService', () => {
         }),
       });
 
-      expect((scannerService as any).scanWebsite).toHaveBeenCalledWith('https://example.com');
-      expect((reportService as any).saveScanResult).toHaveBeenCalledWith(mockScanResult);
+      expect((scannerService as any).scanWebsite).toHaveBeenCalledWith(
+        'https://example.com',
+      );
+      expect((reportService as any).saveScanResult).toHaveBeenCalledWith(
+        mockScanResult,
+      );
     });
 
     it('should handle scan failure', async () => {
@@ -534,9 +564,13 @@ describe('RedisQueueService', () => {
       };
 
       (prismaService as any).scanJob.update.mockResolvedValue(mockJob);
-      (scannerService as any).scanWebsite.mockRejectedValue(new Error('Connection timeout'));
+      (scannerService as any).scanWebsite.mockRejectedValue(
+        new Error('Connection timeout'),
+      );
 
-      await expect((service as any).processJob(mockBullJob)).rejects.toThrow('Connection timeout');
+      await expect((service as any).processJob(mockBullJob)).rejects.toThrow(
+        'Connection timeout',
+      );
 
       expect((prismaService as any).scanJob.update).toHaveBeenLastCalledWith({
         where: { id: 'job-123' },

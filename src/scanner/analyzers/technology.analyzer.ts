@@ -9,7 +9,7 @@ export interface TechnologyInfo {
   gdprNote?: string;
 }
 
-export type TechnologyCategory = 
+export type TechnologyCategory =
   | 'cms'
   | 'framework'
   | 'analytics'
@@ -155,7 +155,11 @@ const TECH_SIGNATURES: Array<{
     name: 'Google Analytics',
     category: 'analytics',
     patterns: {
-      scripts: [/google-analytics\.com\/analytics\.js/i, /googletagmanager\.com\/gtag/i, /ga\.js/i],
+      scripts: [
+        /google-analytics\.com\/analytics\.js/i,
+        /googletagmanager\.com\/gtag/i,
+        /ga\.js/i,
+      ],
       globals: ['ga', 'gtag', 'dataLayer'],
     },
     gdprRelevant: true,
@@ -471,15 +475,33 @@ export class TechnologyAnalyzer {
     const globals = await page.evaluate(() => {
       const detected: string[] = [];
       const globalsToCheck = [
-        'React', 'Vue', 'angular', 'ng', 'jQuery', '$',
-        'wp', 'Drupal', 'Shopify',
-        'ga', 'gtag', 'dataLayer', 'fbq', 'hj', 'mixpanel',
-        'OneTrust', 'Cookiebot', 'CookieConsent',
-        '__NEXT_DATA__', '__NUXT__',
-        'Intercom', 'zE', '$crisp',
-        'grecaptcha', 'hcaptcha',
+        'React',
+        'Vue',
+        'angular',
+        'ng',
+        'jQuery',
+        '$',
+        'wp',
+        'Drupal',
+        'Shopify',
+        'ga',
+        'gtag',
+        'dataLayer',
+        'fbq',
+        'hj',
+        'mixpanel',
+        'OneTrust',
+        'Cookiebot',
+        'CookieConsent',
+        '__NEXT_DATA__',
+        '__NUXT__',
+        'Intercom',
+        'zE',
+        '$crisp',
+        'grecaptcha',
+        'hcaptcha',
       ];
-      
+
       for (const g of globalsToCheck) {
         try {
           if ((window as any)[g] !== undefined) {
@@ -509,8 +531,8 @@ export class TechnologyAnalyzer {
   }
 
   private matchesTechnology(
-    tech: typeof TECH_SIGNATURES[0],
-    globals: string[]
+    tech: (typeof TECH_SIGNATURES)[0],
+    globals: string[],
   ): boolean {
     const patterns = tech.patterns;
 
@@ -526,7 +548,7 @@ export class TechnologyAnalyzer {
     // Check script URLs
     if (patterns.scripts) {
       for (const pattern of patterns.scripts) {
-        if (this.scriptUrls.some(url => pattern.test(url))) {
+        if (this.scriptUrls.some((url) => pattern.test(url))) {
           return true;
         }
       }
@@ -549,12 +571,18 @@ export class TechnologyAnalyzer {
 
     return {
       technologies,
-      cms: technologies.find(t => t.category === 'cms')?.name || null,
-      framework: technologies.find(t => t.category === 'framework')?.name || null,
-      consentPlatform: technologies.find(t => t.category === 'consent')?.name || null,
-      analytics: technologies.filter(t => t.category === 'analytics').map(t => t.name),
-      advertising: technologies.filter(t => t.category === 'advertising').map(t => t.name),
-      cdn: technologies.find(t => t.category === 'cdn')?.name || null,
+      cms: technologies.find((t) => t.category === 'cms')?.name || null,
+      framework:
+        technologies.find((t) => t.category === 'framework')?.name || null,
+      consentPlatform:
+        technologies.find((t) => t.category === 'consent')?.name || null,
+      analytics: technologies
+        .filter((t) => t.category === 'analytics')
+        .map((t) => t.name),
+      advertising: technologies
+        .filter((t) => t.category === 'advertising')
+        .map((t) => t.name),
+      cdn: technologies.find((t) => t.category === 'cdn')?.name || null,
     };
   }
 }

@@ -25,7 +25,7 @@ const CONSENT_SELECTORS = {
     '#truste-consent-track',
     '.optanon-alert-box-wrapper',
   ],
-  
+
   // Accept button selectors
   acceptButtons: [
     '[class*="accept"]',
@@ -44,7 +44,7 @@ const CONSENT_SELECTORS = {
     '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
     '.cc-btn.cc-allow',
   ],
-  
+
   // Reject button selectors
   rejectButtons: [
     '[class*="reject"]',
@@ -62,7 +62,7 @@ const CONSENT_SELECTORS = {
     '#CybotCookiebotDialogBodyButtonDecline',
     '.cc-btn.cc-deny',
   ],
-  
+
   // Settings/customize button selectors
   settingsButtons: [
     '[class*="settings"]',
@@ -115,15 +115,16 @@ export class ConsentAnalyzer {
           const isVisible = await element.isVisible();
           if (isVisible) {
             result.found = true;
-            
+
             // Check if banner is blocking (modal/overlay)
             const boundingBox = await element.boundingBox();
             if (boundingBox) {
               const viewport = page.viewportSize();
               if (viewport) {
                 // If banner covers significant portion of viewport, it's blocking
-                const coverageRatio = (boundingBox.width * boundingBox.height) / 
-                                     (viewport.width * viewport.height);
+                const coverageRatio =
+                  (boundingBox.width * boundingBox.height) /
+                  (viewport.width * viewport.height);
                 result.isBlocking = coverageRatio > 0.3;
               }
             }
@@ -140,17 +141,26 @@ export class ConsentAnalyzer {
     }
 
     // Check for accept button and get its size
-    const acceptButtonInfo = await this.findButtonWithSize(page, CONSENT_SELECTORS.acceptButtons);
+    const acceptButtonInfo = await this.findButtonWithSize(
+      page,
+      CONSENT_SELECTORS.acceptButtons,
+    );
     result.hasAcceptButton = acceptButtonInfo.found;
     result.quality.acceptButtonSize = acceptButtonInfo.size;
-    
+
     // Check for reject button and get its size
-    const rejectButtonInfo = await this.findButtonWithSize(page, CONSENT_SELECTORS.rejectButtons);
+    const rejectButtonInfo = await this.findButtonWithSize(
+      page,
+      CONSENT_SELECTORS.rejectButtons,
+    );
     result.hasRejectButton = rejectButtonInfo.found;
     result.quality.rejectButtonSize = rejectButtonInfo.size;
-    
+
     // Check for settings option
-    result.hasSettingsOption = await this.hasAnyElement(page, CONSENT_SELECTORS.settingsButtons);
+    result.hasSettingsOption = await this.hasAnyElement(
+      page,
+      CONSENT_SELECTORS.settingsButtons,
+    );
 
     // Analyze consent quality
     await this.analyzeConsentQuality(page, result);
@@ -158,7 +168,10 @@ export class ConsentAnalyzer {
     return result;
   }
 
-  private async analyzeConsentQuality(page: Page, result: ConsentBannerInfo): Promise<void> {
+  private async analyzeConsentQuality(
+    page: Page,
+    result: ConsentBannerInfo,
+  ): Promise<void> {
     // 1. Check for pre-checked boxes (non-essential categories)
     const preCheckedInfo = await this.detectPreCheckedBoxes(page);
     result.quality.hasPreCheckedBoxes = preCheckedInfo.hasPreChecked;
@@ -166,8 +179,12 @@ export class ConsentAnalyzer {
 
     // 2. Check equal prominence (Accept vs Reject button sizes)
     if (result.quality.acceptButtonSize && result.quality.rejectButtonSize) {
-      const acceptArea = result.quality.acceptButtonSize.width * result.quality.acceptButtonSize.height;
-      const rejectArea = result.quality.rejectButtonSize.width * result.quality.rejectButtonSize.height;
+      const acceptArea =
+        result.quality.acceptButtonSize.width *
+        result.quality.acceptButtonSize.height;
+      const rejectArea =
+        result.quality.rejectButtonSize.width *
+        result.quality.rejectButtonSize.height;
       // Reject button should be at least 50% the size of Accept button
       result.quality.hasEqualProminence = rejectArea >= acceptArea * 0.5;
     } else if (result.hasAcceptButton && !result.hasRejectButton) {
@@ -175,7 +192,8 @@ export class ConsentAnalyzer {
     }
 
     // 3. Check for cookie wall (blocking + no way to dismiss without accepting)
-    result.quality.isCookieWall = result.isBlocking && !result.hasRejectButton && !result.hasSettingsOption;
+    result.quality.isCookieWall =
+      result.isBlocking && !result.hasRejectButton && !result.hasSettingsOption;
 
     // 4. Check for granular consent (category toggles)
     const granularInfo = await this.detectGranularConsent(page);
@@ -183,12 +201,15 @@ export class ConsentAnalyzer {
     result.quality.categoryCount = granularInfo.categoryCount;
 
     // 5. Check if close button rejects cookies
-    result.quality.closeButtonRejects = await this.checkCloseButtonBehavior(page);
+    result.quality.closeButtonRejects =
+      await this.checkCloseButtonBehavior(page);
   }
 
-  private async detectPreCheckedBoxes(page: Page): Promise<{ hasPreChecked: boolean; categories: string[] }> {
+  private async detectPreCheckedBoxes(
+    page: Page,
+  ): Promise<{ hasPreChecked: boolean; categories: string[] }> {
     const preCheckedCategories: string[] = [];
-    
+
     // Common selectors for cookie category checkboxes
     const checkboxSelectors = [
       'input[type="checkbox"][checked]',
@@ -200,12 +221,25 @@ export class ConsentAnalyzer {
 
     // Category keywords to identify non-essential categories
     const nonEssentialKeywords = [
-      'analytics', 'analytic', 'statistic', 'performance',
-      'marketing', 'advertising', 'ads', 'targeting',
-      'social', 'preference', 'functional',
+      'analytics',
+      'analytic',
+      'statistic',
+      'performance',
+      'marketing',
+      'advertising',
+      'ads',
+      'targeting',
+      'social',
+      'preference',
+      'functional',
     ];
 
-    const essentialKeywords = ['necessary', 'essential', 'required', 'strictly'];
+    const essentialKeywords = [
+      'necessary',
+      'essential',
+      'required',
+      'strictly',
+    ];
 
     for (const selector of checkboxSelectors) {
       try {
@@ -218,13 +252,22 @@ export class ConsentAnalyzer {
           });
 
           // Check if this is a non-essential category
-          const isNonEssential = nonEssentialKeywords.some(kw => parentText.includes(kw));
-          const isEssential = essentialKeywords.some(kw => parentText.includes(kw));
+          const isNonEssential = nonEssentialKeywords.some((kw) =>
+            parentText.includes(kw),
+          );
+          const isEssential = essentialKeywords.some((kw) =>
+            parentText.includes(kw),
+          );
 
           if (isNonEssential && !isEssential) {
             // Extract category name
-            const categoryMatch = nonEssentialKeywords.find(kw => parentText.includes(kw));
-            if (categoryMatch && !preCheckedCategories.includes(categoryMatch)) {
+            const categoryMatch = nonEssentialKeywords.find((kw) =>
+              parentText.includes(kw),
+            );
+            if (
+              categoryMatch &&
+              !preCheckedCategories.includes(categoryMatch)
+            ) {
               preCheckedCategories.push(categoryMatch);
             }
           }
@@ -240,7 +283,9 @@ export class ConsentAnalyzer {
     };
   }
 
-  private async detectGranularConsent(page: Page): Promise<{ hasGranular: boolean; categoryCount: number }> {
+  private async detectGranularConsent(
+    page: Page,
+  ): Promise<{ hasGranular: boolean; categoryCount: number }> {
     // Look for category toggles/checkboxes
     const categorySelectors = [
       '[class*="category"] input[type="checkbox"]',
@@ -303,13 +348,17 @@ export class ConsentAnalyzer {
     for (const selector of closeSelectors) {
       try {
         const element = await page.$(selector);
-        if (element && await element.isVisible()) {
+        if (element && (await element.isVisible())) {
           // Check if close button has aria-label or title indicating rejection
           const ariaLabel = await element.getAttribute('aria-label');
           const title = await element.getAttribute('title');
           const text = (ariaLabel || title || '').toLowerCase();
-          
-          if (text.includes('reject') || text.includes('decline') || text.includes('refuse')) {
+
+          if (
+            text.includes('reject') ||
+            text.includes('decline') ||
+            text.includes('refuse')
+          ) {
             return true;
           }
           // Close button exists but doesn't clearly reject
@@ -324,13 +373,16 @@ export class ConsentAnalyzer {
   }
 
   private async findButtonWithSize(
-    page: Page, 
-    selectors: string[]
-  ): Promise<{ found: boolean; size: { width: number; height: number } | null }> {
+    page: Page,
+    selectors: string[],
+  ): Promise<{
+    found: boolean;
+    size: { width: number; height: number } | null;
+  }> {
     for (const selector of selectors) {
       try {
         const element = await page.$(selector);
-        if (element && await element.isVisible()) {
+        if (element && (await element.isVisible())) {
           const box = await element.boundingBox();
           if (box) {
             return {
@@ -347,7 +399,10 @@ export class ConsentAnalyzer {
     return { found: false, size: null };
   }
 
-  private async hasAnyElement(page: Page, selectors: string[]): Promise<boolean> {
+  private async hasAnyElement(
+    page: Page,
+    selectors: string[],
+  ): Promise<boolean> {
     for (const selector of selectors) {
       try {
         const element = await page.$(selector);
@@ -368,7 +423,7 @@ export class ConsentAnalyzer {
     for (const selector of CONSENT_SELECTORS.acceptButtons) {
       try {
         const element = await page.$(selector);
-        if (element && await element.isVisible()) {
+        if (element && (await element.isVisible())) {
           await element.click();
           await page.waitForTimeout(1000);
           return true;

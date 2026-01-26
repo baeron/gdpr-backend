@@ -84,7 +84,8 @@ export class HealthService {
     const dbCheck = await this.checkDatabase();
     const memoryCheck = this.checkMemory();
 
-    const isHealthy = dbCheck.status === 'healthy' && memoryCheck.status === 'healthy';
+    const isHealthy =
+      dbCheck.status === 'healthy' && memoryCheck.status === 'healthy';
 
     return {
       status: isHealthy ? 'healthy' : 'unhealthy',
@@ -121,7 +122,8 @@ export class HealthService {
     } catch (error) {
       return {
         status: 'unhealthy',
-        error: error instanceof Error ? error.message : 'Unknown database error',
+        error:
+          error instanceof Error ? error.message : 'Unknown database error',
       };
     }
   }
@@ -135,7 +137,9 @@ export class HealthService {
     const memoryUsage = process.memoryUsage();
     const heapUsed = Math.round(memoryUsage.heapUsed / 1024 / 1024);
     const heapTotal = Math.round(memoryUsage.heapTotal / 1024 / 1024);
-    const usedPercent = Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100);
+    const usedPercent = Math.round(
+      (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100,
+    );
 
     return {
       status: usedPercent < 90 ? 'healthy' : 'unhealthy',

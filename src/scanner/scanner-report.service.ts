@@ -135,7 +135,9 @@ export class ScannerReportService {
       },
     });
 
-    this.logger.log(`Saved report ${report.id} with ${report.issues.length} issues`);
+    this.logger.log(
+      `Saved report ${report.id} with ${report.issues.length} issues`,
+    );
     return report.id;
   }
 
@@ -144,10 +146,7 @@ export class ScannerReportService {
       where: { id: reportId },
       include: {
         issues: {
-          orderBy: [
-            { riskLevel: 'desc' },
-            { category: 'asc' },
-          ],
+          orderBy: [{ riskLevel: 'desc' }, { category: 'asc' }],
         },
         auditRequest: true,
       },
@@ -159,10 +158,7 @@ export class ScannerReportService {
       where: { auditRequestId },
       include: {
         issues: {
-          orderBy: [
-            { riskLevel: 'desc' },
-            { category: 'asc' },
-          ],
+          orderBy: [{ riskLevel: 'desc' }, { category: 'asc' }],
         },
       },
     });
@@ -206,29 +202,29 @@ export class ScannerReportService {
     switch (code) {
       case 'COOKIES_BEFORE_CONSENT': {
         const cookies = scanResult.cookies.list
-          .filter(c => c.setBeforeConsent && c.category !== 'necessary')
+          .filter((c) => c.setBeforeConsent && c.category !== 'necessary')
           .slice(0, 5)
-          .map(c => c.name);
+          .map((c) => c.name);
         return `Non-essential cookies set before consent: ${cookies.join(', ')}`;
       }
-      
+
       case 'TRACKERS_BEFORE_CONSENT': {
         const trackers = scanResult.trackers.list
-          .filter(t => t.loadedBeforeConsent)
+          .filter((t) => t.loadedBeforeConsent)
           .slice(0, 5)
-          .map(t => t.name);
+          .map((t) => t.name);
         return `Trackers loaded before consent: ${trackers.join(', ')}`;
       }
-      
+
       case 'NO_REJECT_OPTION':
         return 'Cookie banner does not include a "Reject All" or equivalent button.';
-      
+
       case 'UNEQUAL_BUTTON_PROMINENCE':
         return 'Accept button is more prominent than reject/settings options.';
-      
+
       case 'NO_PRIVACY_POLICY':
         return 'No privacy policy link found on the website.';
-      
+
       case 'PRIVACY_POLICY_INCOMPLETE': {
         const missing: string[] = [];
         const content = scanResult.privacyPolicy.content;
@@ -240,23 +236,23 @@ export class ScannerReportService {
         }
         return `Privacy policy missing required elements: ${missing.join(', ')}`;
       }
-      
+
       case 'US_DATA_TRANSFERS': {
         const services = scanResult.dataTransfers.highRiskTransfers.slice(0, 5);
         return `US-based services detected: ${services.join(', ')}`;
       }
-      
+
       case 'FORMS_WITHOUT_CONSENT': {
         const count = scanResult.forms.formsWithoutConsent;
         return `${count} form(s) collecting personal data without consent checkbox.`;
       }
-      
+
       case 'NO_HTTPS':
         return 'Website is not served over HTTPS.';
-      
+
       case 'MIXED_CONTENT':
         return 'HTTPS page loads resources over insecure HTTP.';
-      
+
       default:
         return '';
     }

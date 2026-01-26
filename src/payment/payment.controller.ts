@@ -12,7 +12,13 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiProperty } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiProperty,
+} from '@nestjs/swagger';
 import { IsString, IsOptional, IsIn } from 'class-validator';
 import type { Request } from 'express';
 import { PaymentService } from './payment.service';
@@ -32,7 +38,11 @@ class CreateCheckoutDto {
   @IsString()
   region?: string;
 
-  @ApiProperty({ description: 'A/B test variant', required: false, enum: ['A', 'B'] })
+  @ApiProperty({
+    description: 'A/B test variant',
+    required: false,
+    enum: ['A', 'B'],
+  })
   @IsOptional()
   @IsIn(['A', 'B'])
   variant?: 'A' | 'B';
@@ -59,7 +69,7 @@ export class PaymentController {
     }
 
     const baseUrl = origin || 'https://policytracker.eu';
-    
+
     const result = await this.paymentService.createCheckoutSession({
       reportId: body.reportId,
       userEmail: body.userEmail,

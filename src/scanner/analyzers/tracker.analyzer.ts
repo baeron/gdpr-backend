@@ -39,7 +39,7 @@ const TRACKER_PATTERNS: TrackerPattern[] = [
     type: 'analytics',
     patterns: [/heap\.io/i, /heapanalytics\.com/i],
   },
-  
+
   // Advertising
   {
     name: 'Facebook Pixel',
@@ -76,7 +76,7 @@ const TRACKER_PATTERNS: TrackerPattern[] = [
     type: 'advertising',
     patterns: [/criteo\.com/i, /criteo\.net/i],
   },
-  
+
   // Social
   {
     name: 'Facebook SDK',
@@ -100,13 +100,13 @@ export class TrackerAnalyzer {
 
   analyzeRequest(request: Request, beforeConsent: boolean): TrackerInfo | null {
     const url = request.url();
-    
+
     for (const tracker of TRACKER_PATTERNS) {
       for (const pattern of tracker.patterns) {
         if (pattern.test(url)) {
           const domain = new URL(url).hostname;
           const key = `${tracker.name}-${domain}`;
-          
+
           // Only update if this is the first detection or if detected before consent
           if (!this.detectedTrackers.has(key) || beforeConsent) {
             const trackerInfo: TrackerInfo = {
@@ -118,12 +118,12 @@ export class TrackerAnalyzer {
             this.detectedTrackers.set(key, trackerInfo);
             return trackerInfo;
           }
-          
+
           return null;
         }
       }
     }
-    
+
     return null;
   }
 

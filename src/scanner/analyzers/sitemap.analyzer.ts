@@ -10,20 +10,49 @@ export interface SitemapInfo {
 
 // Keywords to identify pages that likely contain forms or privacy-related content
 const RELEVANT_PAGE_KEYWORDS = [
-  'contact', 'kontakt', 'kontaktieren',
-  'newsletter', 'subscribe', 'signup', 'sign-up', 'anmelden',
-  'register', 'registration', 'registrieren',
-  'login', 'signin', 'sign-in', 'anmeldung',
-  'privacy', 'datenschutz', 'prywatnosc',
-  'terms', 'agb', 'nutzungsbedingungen',
-  'cookie', 'cookies',
-  'gdpr', 'dsgvo', 'rodo',
-  'imprint', 'impressum',
-  'support', 'help', 'hilfe',
+  'contact',
+  'kontakt',
+  'kontaktieren',
+  'newsletter',
+  'subscribe',
+  'signup',
+  'sign-up',
+  'anmelden',
+  'register',
+  'registration',
+  'registrieren',
+  'login',
+  'signin',
+  'sign-in',
+  'anmeldung',
+  'privacy',
+  'datenschutz',
+  'prywatnosc',
+  'terms',
+  'agb',
+  'nutzungsbedingungen',
+  'cookie',
+  'cookies',
+  'gdpr',
+  'dsgvo',
+  'rodo',
+  'imprint',
+  'impressum',
+  'support',
+  'help',
+  'hilfe',
   'feedback',
-  'account', 'konto', 'profile', 'profil',
-  'checkout', 'cart', 'warenkorb', 'koszyk',
-  'order', 'bestellung', 'zamowienie',
+  'account',
+  'konto',
+  'profile',
+  'profil',
+  'checkout',
+  'cart',
+  'warenkorb',
+  'koszyk',
+  'order',
+  'bestellung',
+  'zamowienie',
 ];
 
 export class SitemapAnalyzer {
@@ -83,14 +112,14 @@ export class SitemapAnalyzer {
 
     for (const sitemapUrl of sitemapUrls) {
       try {
-        const response = await page.goto(sitemapUrl, { 
-          waitUntil: 'domcontentloaded', 
-          timeout: 10000 
+        const response = await page.goto(sitemapUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10000,
         });
-        
+
         if (response && response.ok()) {
           const content = await page.content();
-          
+
           // Parse XML sitemap
           const locMatches = content.match(/<loc>([^<]+)<\/loc>/gi);
           if (locMatches) {
@@ -103,14 +132,20 @@ export class SitemapAnalyzer {
           }
 
           // Check for sitemap index (contains links to other sitemaps)
-          const sitemapMatches = content.match(/<sitemap>[\s\S]*?<loc>([^<]+)<\/loc>[\s\S]*?<\/sitemap>/gi);
+          const sitemapMatches = content.match(
+            /<sitemap>[\s\S]*?<loc>([^<]+)<\/loc>[\s\S]*?<\/sitemap>/gi,
+          );
           if (sitemapMatches && sitemapMatches.length > 0) {
             // Parse first 3 sub-sitemaps
             for (const match of sitemapMatches.slice(0, 3)) {
               const subSitemapUrl = match.match(/<loc>([^<]+)<\/loc>/i)?.[1];
               if (subSitemapUrl) {
-                const subUrls = await this.parseSubSitemap(page, subSitemapUrl, origin);
-                urls.push(...subUrls.filter(u => !urls.includes(u)));
+                const subUrls = await this.parseSubSitemap(
+                  page,
+                  subSitemapUrl,
+                  origin,
+                );
+                urls.push(...subUrls.filter((u) => !urls.includes(u)));
               }
             }
           }
@@ -125,21 +160,26 @@ export class SitemapAnalyzer {
     return urls.slice(0, 500); // Limit to 500 URLs
   }
 
-  private async parseSubSitemap(page: Page, sitemapUrl: string, origin: string): Promise<string[]> {
+  private async parseSubSitemap(
+    page: Page,
+    sitemapUrl: string,
+    origin: string,
+  ): Promise<string[]> {
     const urls: string[] = [];
-    
+
     try {
-      const response = await page.goto(sitemapUrl, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 10000 
+      const response = await page.goto(sitemapUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10000,
       });
-      
+
       if (response && response.ok()) {
         const content = await page.content();
         const locMatches = content.match(/<loc>([^<]+)<\/loc>/gi);
-        
+
         if (locMatches) {
-          for (const match of locMatches.slice(0, 200)) { // Limit per sub-sitemap
+          for (const match of locMatches.slice(0, 200)) {
+            // Limit per sub-sitemap
             const url = match.replace(/<\/?loc>/gi, '').trim();
             if (url.startsWith(origin)) {
               urls.push(url);
@@ -156,16 +196,18 @@ export class SitemapAnalyzer {
 
   private async parseRobotsTxt(page: Page, origin: string): Promise<string[]> {
     const urls: string[] = [];
-    
+
     try {
-      const response = await page.goto(`${origin}/robots.txt`, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 10000 
+      const response = await page.goto(`${origin}/robots.txt`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10000,
       });
-      
+
       if (response && response.ok()) {
-        const content = await page.evaluate(() => document.body?.innerText || '');
-        
+        const content = await page.evaluate(
+          () => document.body?.innerText || '',
+        );
+
         // Look for Sitemap directive in robots.txt
         const sitemapMatches = content.match(/Sitemap:\s*(\S+)/gi);
         if (sitemapMatches) {
@@ -198,20 +240,27 @@ export class SitemapAnalyzer {
     return urls;
   }
 
-  private async crawlHomepageLinks(page: Page, origin: string): Promise<string[]> {
+  private async crawlHomepageLinks(
+    page: Page,
+    origin: string,
+  ): Promise<string[]> {
     const urls: string[] = [];
-    
+
     try {
       // Go back to homepage
       await page.goto(origin, { waitUntil: 'networkidle', timeout: 15000 });
-      
+
       // Get all internal links
-      const links = await page.$$eval('a[href]', (elements, originUrl) => {
-        return elements
-          .map(el => (el as HTMLAnchorElement).href)
-          .filter(href => href.startsWith(originUrl))
-          .filter((href, index, self) => self.indexOf(href) === index);
-      }, origin);
+      const links = await page.$$eval(
+        'a[href]',
+        (elements, originUrl) => {
+          return elements
+            .map((el) => (el as HTMLAnchorElement).href)
+            .filter((href) => href.startsWith(originUrl))
+            .filter((href, index, self) => self.indexOf(href) === index);
+        },
+        origin,
+      );
 
       urls.push(...links);
     } catch {
@@ -223,13 +272,13 @@ export class SitemapAnalyzer {
 
   private filterRelevantUrls(urls: string[]): string[] {
     const relevant: string[] = [];
-    
+
     for (const url of urls) {
       const lowerUrl = url.toLowerCase();
-      const isRelevant = RELEVANT_PAGE_KEYWORDS.some(keyword => 
-        lowerUrl.includes(keyword)
+      const isRelevant = RELEVANT_PAGE_KEYWORDS.some((keyword) =>
+        lowerUrl.includes(keyword),
       );
-      
+
       if (isRelevant && !relevant.includes(url)) {
         relevant.push(url);
       }
@@ -241,10 +290,20 @@ export class SitemapAnalyzer {
 
   getFormPageUrls(sitemapInfo: SitemapInfo): string[] {
     // Return URLs most likely to contain forms
-    const formKeywords = ['contact', 'newsletter', 'subscribe', 'register', 'signup', 'feedback', 'support'];
-    
+    const formKeywords = [
+      'contact',
+      'newsletter',
+      'subscribe',
+      'register',
+      'signup',
+      'feedback',
+      'support',
+    ];
+
     return sitemapInfo.relevantUrls
-      .filter(url => formKeywords.some(kw => url.toLowerCase().includes(kw)))
+      .filter((url) =>
+        formKeywords.some((kw) => url.toLowerCase().includes(kw)),
+      )
       .slice(0, 5); // Limit to 5 form pages
   }
 }

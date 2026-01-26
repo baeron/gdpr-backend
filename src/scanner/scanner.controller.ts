@@ -1,6 +1,30 @@
-import { Controller, Post, Body, Logger, Get, Param, Query, Patch, Delete, Inject } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiProperty, ApiQuery } from '@nestjs/swagger';
-import { IsString, IsUrl, IsOptional, IsBoolean, IsNumber, IsEmail } from 'class-validator';
+import {
+  Controller,
+  Post,
+  Body,
+  Logger,
+  Get,
+  Param,
+  Query,
+  Patch,
+  Delete,
+  Inject,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiProperty,
+  ApiQuery,
+} from '@nestjs/swagger';
+import {
+  IsString,
+  IsUrl,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  IsEmail,
+} from 'class-validator';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
 import { QUEUE_SERVICE } from './queue/queue.interface';
@@ -138,24 +162,30 @@ Performs a comprehensive GDPR compliance scan on the specified website.
     },
   })
   @ApiResponse({ status: 400, description: 'Invalid URL provided' })
-  async scanWebsite(@Body() body: ScanRequestDto): Promise<ScanResultDto & { reportId?: string }> {
+  async scanWebsite(
+    @Body() body: ScanRequestDto,
+  ): Promise<ScanResultDto & { reportId?: string }> {
     this.logger.log(`Received scan request for: ${body.websiteUrl}`);
-    
+
     const result = await this.scannerService.scanWebsite(body.websiteUrl);
-    
+
     // Optionally save to database
     if (body.saveToDb !== false) {
-      const reportId = await this.reportService.saveScanResult(result, body.auditRequestId);
+      const reportId = await this.reportService.saveScanResult(
+        result,
+        body.auditRequestId,
+      );
       return { ...result, reportId };
     }
-    
+
     return result;
   }
 
   @Get('report/:id')
   @ApiOperation({
     summary: 'Get scan report by ID',
-    description: 'Retrieves a previously saved scan report with all issues and details.',
+    description:
+      'Retrieves a previously saved scan report with all issues and details.',
   })
   @ApiResponse({
     status: 200,
@@ -192,8 +222,17 @@ Performs a comprehensive GDPR compliance scan on the specified website.
     summary: 'Get scan history for a website',
     description: 'Retrieves all scan reports for a specific website URL.',
   })
-  @ApiQuery({ name: 'url', description: 'Website URL to search for', example: 'example.com' })
-  @ApiQuery({ name: 'limit', description: 'Maximum number of reports to return', required: false, example: 10 })
+  @ApiQuery({
+    name: 'url',
+    description: 'Website URL to search for',
+    example: 'example.com',
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Maximum number of reports to return',
+    required: false,
+    example: 10,
+  })
   @ApiResponse({
     status: 200,
     description: 'List of reports',
@@ -208,15 +247,22 @@ Performs a comprehensive GDPR compliance scan on the specified website.
       ],
     },
   })
-  async getReportsByWebsite(@Query('url') url: string, @Query('limit') limit?: string) {
+  async getReportsByWebsite(
+    @Query('url') url: string,
+    @Query('limit') limit?: string,
+  ) {
     this.logger.log(`Fetching reports for: ${url}`);
-    return this.reportService.getReportsByWebsite(url, limit ? parseInt(limit, 10) : 10);
+    return this.reportService.getReportsByWebsite(
+      url,
+      limit ? parseInt(limit, 10) : 10,
+    );
   }
 
   @Patch('issue/:id/status')
   @ApiOperation({
     summary: 'Update issue status',
-    description: 'Updates the status of a specific issue (e.g., mark as resolved).',
+    description:
+      'Updates the status of a specific issue (e.g., mark as resolved).',
   })
   @ApiResponse({
     status: 200,
@@ -280,7 +326,8 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
   @Get('job/:id')
   @ApiOperation({
     summary: 'Get scan job status',
-    description: 'Check the status of a queued/processing scan job. Poll this endpoint to track progress.',
+    description:
+      'Check the status of a queued/processing scan job. Poll this endpoint to track progress.',
   })
   @ApiResponse({
     status: 200,
@@ -311,10 +358,14 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
   @Delete('job/:id')
   @ApiOperation({
     summary: 'Cancel a queued scan',
-    description: 'Cancel a scan that is still in the queue (not yet processing).',
+    description:
+      'Cancel a scan that is still in the queue (not yet processing).',
   })
   @ApiResponse({ status: 200, description: 'Job cancelled' })
-  @ApiResponse({ status: 400, description: 'Job cannot be cancelled (already processing or completed)' })
+  @ApiResponse({
+    status: 400,
+    description: 'Job cannot be cancelled (already processing or completed)',
+  })
   async cancelJob(@Param('id') id: string) {
     this.logger.log(`Cancelling job: ${id}`);
     const cancelled = await this.queueService.cancelJob(id);
@@ -324,7 +375,8 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
   @Get('queue/stats')
   @ApiOperation({
     summary: 'Get queue statistics',
-    description: 'Returns current queue status: jobs waiting, processing, completed, etc.',
+    description:
+      'Returns current queue status: jobs waiting, processing, completed, etc.',
   })
   @ApiResponse({
     status: 200,

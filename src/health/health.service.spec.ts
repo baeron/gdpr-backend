@@ -62,7 +62,9 @@ describe('HealthService', () => {
     });
 
     it('should return unhealthy when database is not connected', async () => {
-      mockPrismaService.$queryRaw.mockRejectedValue(new Error('Connection failed'));
+      mockPrismaService.$queryRaw.mockRejectedValue(
+        new Error('Connection failed'),
+      );
 
       const result = await service.getReadiness();
 

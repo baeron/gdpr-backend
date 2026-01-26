@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScannerService } from '../scanner.service';
 import { ScannerReportService } from '../scanner-report.service';
-import { IQueueService, QueuedJob, JobStatus, QueueStats } from './queue.interface';
+import {
+  IQueueService,
+  QueuedJob,
+  JobStatus,
+  QueueStats,
+} from './queue.interface';
 
 const MAX_CONCURRENT_SCANS = 1;
 const POLL_INTERVAL = 5000;
@@ -63,7 +68,8 @@ export class PostgresQueueService implements IQueueService {
 
     if (!job) return null;
 
-    const position = job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
+    const position =
+      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
     return this.formatJobStatus(job, position);
   }
 
@@ -170,7 +176,10 @@ export class PostgresQueueService implements IQueueService {
       const result = await this.scannerService.scanWebsite(job.websiteUrl);
       await this.updateProgress(job.id, 90, 'Saving results...');
 
-      const reportId = await this.reportService.saveScanResult(result, job.auditRequestId);
+      const reportId = await this.reportService.saveScanResult(
+        result,
+        job.auditRequestId,
+      );
 
       await (this.prisma as any).scanJob.update({
         where: { id: job.id },
@@ -219,7 +228,8 @@ export class PostgresQueueService implements IQueueService {
       queuedAt: job.queuedAt,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
-      estimatedWaitMinutes: position && position > 0 ? Math.ceil(position * 1) : null,
+      estimatedWaitMinutes:
+        position && position > 0 ? Math.ceil(position * 1) : null,
     };
   }
 }

@@ -1,0 +1,234 @@
+# Azure Pipelines - Load/Stress Test Pipeline
+# Manual trigger only - for performance testing
+
+trigger: none
+pr: none
+
+parameters:
+  - name: scenario
+    displayName: 'Test Scenario'
+    type: string
+    default: 'smoke'
+    values:
+      - smoke
+      - load
+      - stress
+      - queue-stats
+
+  - name: environment
+    displayName: 'Target Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - prod
+
+  - name: queueType
+    displayName: 'Queue Type to Test'
+    type: string
+    default: 'postgres'
+    values:
+      - postgres
+      - redis
+
+  - name: vus
+    displayName: 'Virtual Users (overrides scenario default)'
+    type: number
+    default: 0
+
+  - name: duration
+    displayName: 'Duration (e.g., 30s, 5m, 10m)'
+    type: string
+    default: ''
+
+variables:
+  ${{ if eq(parameters.environment, 'dev') }}:
+    baseUrl: 'https://dev.api.policytracker.eu'
+  ${{ else }}:
+    baseUrl: 'https://api.policytracker.eu'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  # ============================================
+  # Stage 1: Setup and Validation
+  # ============================================
+  - stage: Setup
+    displayName: 'Setup'
+    jobs:
+      - job: Validate
+        displayName: 'Validate Target'
+        steps:
+          - script: |
+              echo "=== Load Test Configuration ==="
+              echo "Scenario: ${{ parameters.scenario }}"
+              echo "Environment: ${{ parameters.environment }}"
+              echo "Target URL: $(baseUrl)"
+              echo "Queue Type: ${{ parameters.queueType }}"
+              echo "Custom VUs: ${{ parameters.vus }}"
+              echo "Custom Duration: ${{ parameters.duration }}"
+              echo ""
+              
+              # Health check
+              echo "Checking target health..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $(baseUrl)/api/health)
+              
+              if [ "$HTTP_STATUS" -eq 200 ]; then
+                echo "✅ Target is healthy (HTTP $HTTP_STATUS)"
+              else
+                echo "❌ Target is not healthy (HTTP $HTTP_STATUS)"
+                exit 1
+              fi
+              
+              # Queue stats check
+              echo ""
+              echo "Checking queue stats..."
+              curl -s $(baseUrl)/api/health/queue/stats | jq .
+            displayName: 'Validate target environment'
+
+  # ============================================
+  # Stage 2: Run Load Tests
+  # ============================================
+  - stage: LoadTest
+    displayName: 'Run Load Tests'
+    dependsOn: Setup
+    jobs:
+      - job: RunK6
+        displayName: 'Execute k6 Tests'
+        timeoutInMinutes: 60
+        steps:
+          - checkout: self
+
+          - script: |
+              # Install k6
+              sudo gpg -k
+              sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+              echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+              sudo apt-get update
+              sudo apt-get install -y k6
+              
+              k6 version
+            displayName: 'Install k6'
+
+          - script: |
+              mkdir -p $(Build.ArtifactStagingDirectory)/results
+            displayName: 'Create results directory'
+
+          - script: |
+              SCENARIO="${{ parameters.scenario }}"
+              VUS="${{ parameters.vus }}"
+              DURATION="${{ parameters.duration }}"
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              RESULT_FILE="$(Build.ArtifactStagingDirectory)/results/${SCENARIO}-${{ parameters.queueType }}-${TIMESTAMP}.json"
+              
+              # Build k6 command
+              K6_CMD="k6 run --env BASE_URL=$(baseUrl)"
+              
+              # Add custom VUs if specified
+              if [ "$VUS" -gt 0 ]; then
+                K6_CMD="$K6_CMD --vus $VUS"
+              fi
+              
+              # Add custom duration if specified
+              if [ -n "$DURATION" ]; then
+                K6_CMD="$K6_CMD --duration $DURATION"
+              fi
+              
+              # Add output file
+              K6_CMD="$K6_CMD --out json=$RESULT_FILE"
+              
+              # Select test script based on scenario
+              case "$SCENARIO" in
+                smoke)
+                  K6_CMD="$K6_CMD tests/load/smoke.js"
+                  ;;
+                load|stress)
+                  K6_CMD="$K6_CMD tests/load/scan-queue.js"
+                  ;;
+                queue-stats)
+                  K6_CMD="$K6_CMD tests/load/queue-stats.js"
+                  ;;
+              esac
+              
+              # Add tags
+              K6_CMD="$K6_CMD --tag scenario=$SCENARIO --tag queue=${{ parameters.queueType }} --tag env=${{ parameters.environment }}"
+              
+              echo "=== Running k6 ==="
+              echo "Command: $K6_CMD"
+              echo ""
+              
+              # Run k6 (continue even if thresholds fail)
+              $K6_CMD || true
+              
+              echo ""
+              echo "=== Test Complete ==="
+              echo "Results saved to: $RESULT_FILE"
+            displayName: 'Run k6 load test'
+            env:
+              K6_CONSOLE_OUTPUT: 'true'
+
+          - script: |
+              echo "=== Test Summary ==="
+              echo ""
+              echo "Scenario: ${{ parameters.scenario }}"
+              echo "Environment: ${{ parameters.environment }}"
+              echo "Queue Type: ${{ parameters.queueType }}"
+              echo "Target: $(baseUrl)"
+              echo ""
+              
+              # Show result files
+              echo "Result files:"
+              ls -la $(Build.ArtifactStagingDirectory)/results/
+            displayName: 'Test summary'
+
+          - publish: $(Build.ArtifactStagingDirectory)/results
+            artifact: 'loadtest-results-${{ parameters.scenario }}-${{ parameters.queueType }}-$(Build.BuildId)'
+            displayName: 'Publish test results'
+
+  # ============================================
+  # Stage 3: Generate Report (Optional)
+  # ============================================
+  - stage: Report
+    displayName: 'Generate Report'
+    dependsOn: LoadTest
+    condition: succeeded()
+    jobs:
+      - job: Summary
+        displayName: 'Create Summary'
+        steps:
+          - download: current
+            artifact: 'loadtest-results-${{ parameters.scenario }}-${{ parameters.queueType }}-$(Build.BuildId)'
+            displayName: 'Download results'
+
+          - script: |
+              echo "# Load Test Report" > $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "## Configuration" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Parameter | Value |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "|-----------|-------|" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Scenario | ${{ parameters.scenario }} |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Environment | ${{ parameters.environment }} |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Queue Type | ${{ parameters.queueType }} |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Target URL | $(baseUrl) |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Build ID | $(Build.BuildId) |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "| Date | $(date -u +%Y-%m-%d) |" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "## Results" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "See attached JSON files for detailed metrics." >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "### Key Metrics to Compare" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "- **http_req_duration**: Response time (p50, p95, p99)" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "- **http_req_failed**: Error rate" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "- **http_reqs**: Throughput (requests/second)" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              echo "- **iterations**: Completed test iterations" >> $(Build.ArtifactStagingDirectory)/REPORT.md
+              
+              cat $(Build.ArtifactStagingDirectory)/REPORT.md
+            displayName: 'Generate report'
+
+          - publish: $(Build.ArtifactStagingDirectory)/REPORT.md
+            artifact: 'loadtest-report-$(Build.BuildId)'
+            displayName: 'Publish report'

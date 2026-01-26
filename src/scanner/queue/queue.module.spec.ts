@@ -46,27 +46,27 @@ describe('QueueModule', () => {
 
     it('should use postgres queue type by default', () => {
       delete process.env.QUEUE_TYPE;
-      
+
       // The module registers based on env var at registration time
       const result = QueueModule.register();
-      
+
       expect(result).toBeDefined();
       // The actual service type is determined by the factory at runtime
     });
 
     it('should handle redis queue type', () => {
       process.env.QUEUE_TYPE = 'redis';
-      
+
       const result = QueueModule.register();
-      
+
       expect(result).toBeDefined();
     });
 
     it('should handle postgres queue type explicitly', () => {
       process.env.QUEUE_TYPE = 'postgres';
-      
+
       const result = QueueModule.register();
-      
+
       expect(result).toBeDefined();
     });
   });

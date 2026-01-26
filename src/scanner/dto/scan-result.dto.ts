@@ -72,7 +72,13 @@ export interface PrivacyPolicyInfo {
 }
 
 export interface FormInfo {
-  type: 'contact' | 'newsletter' | 'login' | 'registration' | 'search' | 'other';
+  type:
+    | 'contact'
+    | 'newsletter'
+    | 'login'
+    | 'registration'
+    | 'search'
+    | 'other';
   hasEmailField: boolean;
   hasConsentCheckbox: boolean;
   hasPrivacyPolicyLink: boolean;
@@ -93,7 +99,14 @@ export interface FormsAnalysisResult {
 export interface USServiceInfo {
   name: string;
   domain: string;
-  category: 'analytics' | 'advertising' | 'cdn' | 'cloud' | 'social' | 'payment' | 'other';
+  category:
+    | 'analytics'
+    | 'advertising'
+    | 'cdn'
+    | 'cloud'
+    | 'social'
+    | 'payment'
+    | 'other';
   dataProcessed: string;
 }
 

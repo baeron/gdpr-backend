@@ -12,7 +12,7 @@ export interface PricingConfig {
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
-  private readonly stripe: Stripe;
+  private readonly stripe: Stripe | null = null;
 
   // A/B test pricing variants by region
   private readonly pricingByRegion: Record<string, { A: number; B: number }> = {
@@ -35,9 +35,12 @@ export class PaymentService {
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
-      this.logger.warn('STRIPE_SECRET_KEY not configured');
+      this.logger.warn(
+        'STRIPE_SECRET_KEY not configured - payment features disabled',
+      );
+    } else {
+      this.stripe = new Stripe(secretKey);
     }
-    this.stripe = new Stripe(secretKey || '');
   }
 
   /**
@@ -45,12 +48,14 @@ export class PaymentService {
    */
   getPricing(region: string, variant?: 'A' | 'B'): PricingConfig {
     const normalizedRegion = this.normalizeRegion(region);
-    const pricing = this.pricingByRegion[normalizedRegion] || this.pricingByRegion.DEFAULT;
-    const currency = this.currencyByRegion[normalizedRegion] || this.currencyByRegion.DEFAULT;
-    
+    const pricing =
+      this.pricingByRegion[normalizedRegion] || this.pricingByRegion.DEFAULT;
+    const currency =
+      this.currencyByRegion[normalizedRegion] || this.currencyByRegion.DEFAULT;
+
     // Random A/B assignment if not specified
     const selectedVariant = variant || (Math.random() < 0.5 ? 'A' : 'B');
-    
+
     return {
       amount: pricing[selectedVariant],
       currency,
@@ -69,11 +74,17 @@ export class PaymentService {
     successUrl: string;
     cancelUrl: string;
   }): Promise<{ sessionId: string; url: string; pricing: PricingConfig }> {
+    if (!this.stripe) {
+      throw new Error(
+        'Payment service not configured - STRIPE_SECRET_KEY missing',
+      );
+    }
+
     const pricing = this.getPricing(params.region, params.variant);
-    
+
     this.logger.log(
       `Creating checkout session for report ${params.reportId}, ` +
-      `pricing: ${pricing.amount} ${pricing.currency} (variant ${pricing.variant})`
+        `pricing: ${pricing.amount} ${pricing.currency} (variant ${pricing.variant})`,
     );
 
     // Create payment record in database
@@ -96,7 +107,8 @@ export class PaymentService {
             currency: pricing.currency,
             product_data: {
               name: 'GDPR Compliance Full Report',
-              description: 'Complete GDPR compliance analysis with detailed recommendations',
+              description:
+                'Complete GDPR compliance analysis with detailed recommendations',
             },
             unit_amount: pricing.amount,
           },
@@ -131,13 +143,27 @@ export class PaymentService {
    * Handle Stripe webhook events
    */
   async handleWebhook(payload: Buffer, signature: string): Promise<void> {
-    const webhookSecret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
-    
+    if (!this.stripe) {
+      throw new Error(
+        'Payment service not configured - STRIPE_SECRET_KEY missing',
+      );
+    }
+
+    const webhookSecret = this.configService.get<string>(
+      'STRIPE_WEBHOOK_SECRET',
+    );
+
     let event: Stripe.Event;
     try {
-      event = this.stripe.webhooks.constructEvent(payload, signature, webhookSecret || '');
+      event = this.stripe.webhooks.constructEvent(
+        payload,
+        signature,
+        webhookSecret || '',
+      );
     } catch (err) {
-      this.logger.error(`Webhook signature verification failed: ${err.message}`);
+      this.logger.error(
+        `Webhook signature verification failed: ${err.message}`,
+      );
       throw new Error('Webhook signature verification failed');
     }
 
@@ -145,10 +171,14 @@ export class PaymentService {
 
     switch (event.type) {
       case 'checkout.session.completed':
-        await this.handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await this.handleCheckoutCompleted(
+          event.data.object as Stripe.Checkout.Session,
+        );
         break;
       case 'checkout.session.expired':
-        await this.handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
+        await this.handleCheckoutExpired(
+          event.data.object as Stripe.Checkout.Session,
+        );
         break;
       default:
         this.logger.log(`Unhandled event type: ${event.type}`);
@@ -163,12 +193,16 @@ export class PaymentService {
     reportId?: string;
     error?: string;
   }> {
+    if (!this.stripe) {
+      return { success: false, error: 'Payment service not configured' };
+    }
+
     try {
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
-      
+
       if (session.payment_status === 'paid') {
         const reportId = session.metadata?.reportId;
-        
+
         // Update payment status
         if (session.metadata?.paymentId) {
           await this.prisma.payment.update({
@@ -196,6 +230,13 @@ export class PaymentService {
   }
 
   /**
+   * Check if payment service is configured and available
+   */
+  isAvailable(): boolean {
+    return this.stripe !== null;
+  }
+
+  /**
    * Check if full report is unlocked for a given report ID
    */
   async isReportUnlocked(reportId: string): Promise<boolean> {
@@ -206,9 +247,11 @@ export class PaymentService {
     return report?.fullReportUnlocked ?? false;
   }
 
-  private async handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
+  private async handleCheckoutCompleted(
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
     this.logger.log(`Checkout completed: ${session.id}`);
-    
+
     const reportId = session.metadata?.reportId;
     const paymentId = session.metadata?.paymentId;
 
@@ -231,9 +274,11 @@ export class PaymentService {
     }
   }
 
-  private async handleCheckoutExpired(session: Stripe.Checkout.Session): Promise<void> {
+  private async handleCheckoutExpired(
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
     this.logger.log(`Checkout expired: ${session.id}`);
-    
+
     const paymentId = session.metadata?.paymentId;
     if (paymentId) {
       await this.prisma.payment.update({
@@ -246,13 +291,36 @@ export class PaymentService {
   private normalizeRegion(region: string): string {
     const regionMap: Record<string, string> = {
       // EU countries
-      de: 'EU', fr: 'EU', it: 'EU', es: 'EU', nl: 'EU', be: 'EU',
-      at: 'EU', pl: 'EU', pt: 'EU', ie: 'EU', gr: 'EU', cz: 'EU',
-      ro: 'EU', hu: 'EU', se: 'EU', fi: 'EU', dk: 'EU', sk: 'EU',
-      bg: 'EU', hr: 'EU', lt: 'EU', si: 'EU', lv: 'EU', ee: 'EU',
-      cy: 'EU', lu: 'EU', mt: 'EU',
+      de: 'EU',
+      fr: 'EU',
+      it: 'EU',
+      es: 'EU',
+      nl: 'EU',
+      be: 'EU',
+      at: 'EU',
+      pl: 'EU',
+      pt: 'EU',
+      ie: 'EU',
+      gr: 'EU',
+      cz: 'EU',
+      ro: 'EU',
+      hu: 'EU',
+      se: 'EU',
+      fi: 'EU',
+      dk: 'EU',
+      sk: 'EU',
+      bg: 'EU',
+      hr: 'EU',
+      lt: 'EU',
+      si: 'EU',
+      lv: 'EU',
+      ee: 'EU',
+      cy: 'EU',
+      lu: 'EU',
+      mt: 'EU',
       // UK
-      gb: 'UK', uk: 'UK',
+      gb: 'UK',
+      uk: 'UK',
       // US
       us: 'US',
       // Locales

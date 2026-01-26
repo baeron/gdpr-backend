@@ -9,7 +9,8 @@ async function bootstrap() {
   // Swagger/OpenAPI documentation
   const config = new DocumentBuilder()
     .setTitle('GDPR Audit API')
-    .setDescription(`
+    .setDescription(
+      `
 ## GDPR Website Scanner API
 
 This API provides comprehensive GDPR compliance scanning for websites.
@@ -32,7 +33,8 @@ This API provides comprehensive GDPR compliance scanning for websites.
 
 ### Scoring
 Score is calculated 0-100 based on issues found. Higher score = better compliance.
-    `)
+    `,
+    )
     .setVersion('1.0')
     .addTag('scanner', 'GDPR website scanning endpoints')
     .addTag('health', 'Health check endpoints')

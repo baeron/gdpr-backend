@@ -13,7 +13,7 @@ export class QueueModule {
 
   static register(): DynamicModule {
     const queueType = process.env.QUEUE_TYPE || 'postgres';
-    
+
     this.logger.log(`Registering queue module with type: ${queueType}`);
 
     const queueProvider = {
@@ -27,7 +27,7 @@ export class QueueModule {
           this.logger.log('Using Redis/BullMQ queue');
           return new RedisQueueService(prisma, scanner, report);
         }
-        
+
         this.logger.log('Using PostgreSQL queue');
         return new PostgresQueueService(prisma, scanner, report);
       },

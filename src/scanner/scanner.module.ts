@@ -17,12 +17,12 @@ const queueProvider = {
     report: ScannerReportService,
   ) => {
     const queueType = process.env.QUEUE_TYPE || 'postgres';
-    
+
     if (queueType === 'redis') {
       console.log('📦 Using Redis/BullMQ queue');
       return new RedisQueueService(prisma, scanner, report);
     }
-    
+
     console.log('📦 Using PostgreSQL queue');
     return new PostgresQueueService(prisma, scanner, report);
   },
@@ -32,11 +32,7 @@ const queueProvider = {
 @Module({
   imports: [PrismaModule],
   controllers: [ScannerController],
-  providers: [
-    ScannerService,
-    ScannerReportService,
-    queueProvider,
-  ],
+  providers: [ScannerService, ScannerReportService, queueProvider],
   exports: [ScannerService, ScannerReportService, QUEUE_SERVICE],
 })
 export class ScannerModule implements OnModuleInit, OnModuleDestroy {

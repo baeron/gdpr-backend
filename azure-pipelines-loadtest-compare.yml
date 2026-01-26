@@ -1,0 +1,504 @@
+# Azure Pipelines - Load Test Comparison Pipeline
+# Compares PostgreSQL vs Redis/BullMQ queue performance
+# Runs both tests sequentially and generates comparison report
+
+trigger: none
+pr: none
+
+parameters:
+  - name: scenario
+    displayName: 'Test Scenario'
+    type: string
+    default: 'smoke'
+    values:
+      - smoke
+      - load
+
+  - name: environment
+    displayName: 'Target Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+
+  - name: vus
+    displayName: 'Virtual Users (0 = use scenario default)'
+    type: number
+    default: 0
+
+  - name: duration
+    displayName: 'Duration (empty = use scenario default)'
+    type: string
+    default: ''
+
+variables:
+  - group: vultr-deployment
+  - ${{ if eq(parameters.environment, 'dev') }}:
+      baseUrl: 'https://dev.api.policytracker.eu'
+      apiContainer: 'gdpr-api-dev'
+      composeFile: 'docker-compose.devprod.yml'
+      envFile: '.env.devprod'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  # ============================================
+  # Stage 1: Setup
+  # ============================================
+  - stage: Setup
+    displayName: 'Setup'
+    jobs:
+      - job: Prepare
+        displayName: 'Prepare Environment'
+        steps:
+          - script: |
+              echo "=== Load Test Comparison ==="
+              echo "Scenario: ${{ parameters.scenario }}"
+              echo "Environment: ${{ parameters.environment }}"
+              echo "Target URL: $(baseUrl)"
+              echo ""
+              
+              # Install k6
+              sudo gpg -k
+              sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+              echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+              sudo apt-get update
+              sudo apt-get install -y k6 jq
+              
+              k6 version
+              jq --version
+            displayName: 'Install tools'
+
+  # ============================================
+  # Stage 2: Test PostgreSQL Queue
+  # ============================================
+  - stage: TestPostgres
+    displayName: 'Test PostgreSQL'
+    dependsOn: Setup
+    variables:
+      - group: vultr-deployment
+      - group: gdpr-secrets-dev
+    jobs:
+      - job: SwitchToPostgres
+        displayName: 'Switch to PostgreSQL Queue'
+        steps:
+          - script: |
+              mkdir -p ~/.ssh
+              echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
+              chmod 600 ~/.ssh/deploy_key
+              ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
+            displayName: 'Setup SSH'
+
+          - script: |
+              ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'SWITCH_SCRIPT'
+                set -e
+                cd /opt/gdpr-backend
+                
+                echo "=== Switching to PostgreSQL queue ==="
+                
+                # Update env file
+                sed -i 's/QUEUE_TYPE=redis/QUEUE_TYPE=postgres/' $(envFile) || true
+                grep -q "QUEUE_TYPE" $(envFile) || echo "QUEUE_TYPE=postgres" >> $(envFile)
+                
+                # Restart API container
+                docker-compose --env-file $(envFile) -f $(composeFile) restart api-dev || \
+                docker-compose --env-file $(envFile) -f $(composeFile) up -d api-dev
+                
+                # Wait for healthy
+                for i in {1..30}; do
+                  if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+                    echo "API is healthy"
+                    break
+                  fi
+                  echo "Waiting... ($i/30)"
+                  sleep 2
+                done
+                
+                # Verify queue type
+                echo "Queue stats:"
+                curl -s http://localhost:3001/api/health/queue/stats | jq .
+              SWITCH_SCRIPT
+            displayName: 'Switch to PostgreSQL'
+
+      - job: RunPostgresTest
+        displayName: 'Run PostgreSQL Tests'
+        dependsOn: SwitchToPostgres
+        steps:
+          - checkout: self
+
+          - script: |
+              sudo apt-get update
+              sudo apt-get install -y k6
+            displayName: 'Install k6'
+
+          - script: |
+              mkdir -p $(Build.ArtifactStagingDirectory)/results
+              
+              SCENARIO="${{ parameters.scenario }}"
+              VUS="${{ parameters.vus }}"
+              DURATION="${{ parameters.duration }}"
+              
+              K6_CMD="k6 run --env BASE_URL=$(baseUrl)"
+              
+              if [ "$VUS" -gt 0 ]; then
+                K6_CMD="$K6_CMD --vus $VUS"
+              fi
+              
+              if [ -n "$DURATION" ]; then
+                K6_CMD="$K6_CMD --duration $DURATION"
+              fi
+              
+              K6_CMD="$K6_CMD --out json=$(Build.ArtifactStagingDirectory)/results/postgres.json"
+              
+              case "$SCENARIO" in
+                smoke)
+                  K6_CMD="$K6_CMD tests/load/smoke.js"
+                  ;;
+                load)
+                  K6_CMD="$K6_CMD tests/load/scan-queue.js"
+                  ;;
+              esac
+              
+              K6_CMD="$K6_CMD --tag queue=postgres"
+              
+              echo "Running: $K6_CMD"
+              $K6_CMD || true
+              
+              echo "PostgreSQL test complete"
+            displayName: 'Run k6 PostgreSQL test'
+
+          - publish: $(Build.ArtifactStagingDirectory)/results
+            artifact: 'postgres-results'
+            displayName: 'Publish PostgreSQL results'
+
+  # ============================================
+  # Stage 3: Test Redis Queue
+  # ============================================
+  - stage: TestRedis
+    displayName: 'Test Redis'
+    dependsOn: TestPostgres
+    variables:
+      - group: vultr-deployment
+      - group: gdpr-secrets-dev
+    jobs:
+      - job: SwitchToRedis
+        displayName: 'Switch to Redis Queue'
+        steps:
+          - script: |
+              mkdir -p ~/.ssh
+              echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
+              chmod 600 ~/.ssh/deploy_key
+              ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
+            displayName: 'Setup SSH'
+
+          - script: |
+              ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'SWITCH_SCRIPT'
+                set -e
+                cd /opt/gdpr-backend
+                
+                echo "=== Switching to Redis queue ==="
+                
+                # Update env file
+                sed -i 's/QUEUE_TYPE=postgres/QUEUE_TYPE=redis/' $(envFile)
+                
+                # Start Redis if not running
+                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis up -d redis-dev || true
+                
+                # Restart API container
+                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis restart api-dev || \
+                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis up -d api-dev
+                
+                # Wait for healthy
+                for i in {1..30}; do
+                  if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+                    echo "API is healthy"
+                    break
+                  fi
+                  echo "Waiting... ($i/30)"
+                  sleep 2
+                done
+                
+                # Verify queue type
+                echo "Queue stats:"
+                curl -s http://localhost:3001/api/health/queue/stats | jq .
+              SWITCH_SCRIPT
+            displayName: 'Switch to Redis'
+
+      - job: RunRedisTest
+        displayName: 'Run Redis Tests'
+        dependsOn: SwitchToRedis
+        steps:
+          - checkout: self
+
+          - script: |
+              sudo apt-get update
+              sudo apt-get install -y k6
+            displayName: 'Install k6'
+
+          - script: |
+              mkdir -p $(Build.ArtifactStagingDirectory)/results
+              
+              SCENARIO="${{ parameters.scenario }}"
+              VUS="${{ parameters.vus }}"
+              DURATION="${{ parameters.duration }}"
+              
+              K6_CMD="k6 run --env BASE_URL=$(baseUrl)"
+              
+              if [ "$VUS" -gt 0 ]; then
+                K6_CMD="$K6_CMD --vus $VUS"
+              fi
+              
+              if [ -n "$DURATION" ]; then
+                K6_CMD="$K6_CMD --duration $DURATION"
+              fi
+              
+              K6_CMD="$K6_CMD --out json=$(Build.ArtifactStagingDirectory)/results/redis.json"
+              
+              case "$SCENARIO" in
+                smoke)
+                  K6_CMD="$K6_CMD tests/load/smoke.js"
+                  ;;
+                load)
+                  K6_CMD="$K6_CMD tests/load/scan-queue.js"
+                  ;;
+              esac
+              
+              K6_CMD="$K6_CMD --tag queue=redis"
+              
+              echo "Running: $K6_CMD"
+              $K6_CMD || true
+              
+              echo "Redis test complete"
+            displayName: 'Run k6 Redis test'
+
+          - publish: $(Build.ArtifactStagingDirectory)/results
+            artifact: 'redis-results'
+            displayName: 'Publish Redis results'
+
+  # ============================================
+  # Stage 4: Restore PostgreSQL (Default)
+  # ============================================
+  - stage: Restore
+    displayName: 'Restore Default'
+    dependsOn: TestRedis
+    condition: always()
+    variables:
+      - group: vultr-deployment
+      - group: gdpr-secrets-dev
+    jobs:
+      - job: RestorePostgres
+        displayName: 'Restore PostgreSQL Queue'
+        steps:
+          - script: |
+              mkdir -p ~/.ssh
+              echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
+              chmod 600 ~/.ssh/deploy_key
+              ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
+            displayName: 'Setup SSH'
+
+          - script: |
+              ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'RESTORE_SCRIPT'
+                set -e
+                cd /opt/gdpr-backend
+                
+                echo "=== Restoring PostgreSQL queue (default) ==="
+                
+                # Update env file back to postgres
+                sed -i 's/QUEUE_TYPE=redis/QUEUE_TYPE=postgres/' $(envFile)
+                
+                # Stop Redis
+                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis stop redis-dev || true
+                
+                # Restart API
+                docker-compose --env-file $(envFile) -f $(composeFile) restart api-dev || \
+                docker-compose --env-file $(envFile) -f $(composeFile) up -d api-dev
+                
+                # Wait and verify
+                for i in {1..30}; do
+                  if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+                    echo "API restored"
+                    break
+                  fi
+                  sleep 2
+                done
+                
+                curl -s http://localhost:3001/api/health/queue/stats | jq .
+              RESTORE_SCRIPT
+            displayName: 'Restore PostgreSQL'
+
+  # ============================================
+  # Stage 5: Generate Comparison Report
+  # ============================================
+  - stage: Report
+    displayName: 'Generate Report'
+    dependsOn:
+      - TestPostgres
+      - TestRedis
+    condition: succeeded()
+    jobs:
+      - job: GenerateReport
+        displayName: 'Generate Comparison Report'
+        steps:
+          - download: current
+            artifact: 'postgres-results'
+            displayName: 'Download PostgreSQL results'
+
+          - download: current
+            artifact: 'redis-results'
+            displayName: 'Download Redis results'
+
+          - script: |
+              sudo apt-get update
+              sudo apt-get install -y jq
+            displayName: 'Install jq'
+
+          - script: |
+              POSTGRES_FILE="$(Pipeline.Workspace)/postgres-results/postgres.json"
+              REDIS_FILE="$(Pipeline.Workspace)/redis-results/redis.json"
+              REPORT_FILE="$(Build.ArtifactStagingDirectory)/COMPARISON-REPORT.md"
+              
+              mkdir -p $(Build.ArtifactStagingDirectory)
+              
+              # Extract metrics from k6 JSON (summary lines)
+              extract_metric() {
+                local file=$1
+                local metric=$2
+                grep "\"metric\":\"$metric\"" "$file" | grep '"type":"Point"' | tail -1 | jq -r '.data.value' 2>/dev/null || echo "N/A"
+              }
+              
+              # Extract from summary
+              extract_summary() {
+                local file=$1
+                local metric=$2
+                local stat=$3
+                grep -A 100 '"type":"Metric"' "$file" | grep -A 20 "\"$metric\"" | grep "\"$stat\"" | head -1 | jq -r '.data.value' 2>/dev/null || echo "N/A"
+              }
+              
+              # Parse k6 end-of-test summary (last lines contain aggregated metrics)
+              # k6 JSON output format: each line is a JSON object
+              
+              # Count requests
+              PG_REQS=$(grep '"metric":"http_reqs"' "$POSTGRES_FILE" | grep '"type":"Point"' | wc -l)
+              REDIS_REQS=$(grep '"metric":"http_reqs"' "$REDIS_FILE" | grep '"type":"Point"' | wc -l)
+              
+              # Get duration values (avg from points)
+              PG_DURATION=$(grep '"metric":"http_req_duration"' "$POSTGRES_FILE" | grep '"type":"Point"' | jq -s 'map(.data.value) | add / length | floor' 2>/dev/null || echo "N/A")
+              REDIS_DURATION=$(grep '"metric":"http_req_duration"' "$REDIS_FILE" | grep '"type":"Point"' | jq -s 'map(.data.value) | add / length | floor' 2>/dev/null || echo "N/A")
+              
+              # Get failed requests
+              PG_FAILED=$(grep '"metric":"http_req_failed"' "$POSTGRES_FILE" | grep '"type":"Point"' | jq -s 'map(.data.value) | add' 2>/dev/null || echo "0")
+              REDIS_FAILED=$(grep '"metric":"http_req_failed"' "$REDIS_FILE" | grep '"type":"Point"' | jq -s 'map(.data.value) | add' 2>/dev/null || echo "0")
+              
+              # Calculate error rates
+              if [ "$PG_REQS" -gt 0 ]; then
+                PG_ERROR_RATE=$(echo "scale=2; $PG_FAILED * 100 / $PG_REQS" | bc 2>/dev/null || echo "0")
+              else
+                PG_ERROR_RATE="N/A"
+              fi
+              
+              if [ "$REDIS_REQS" -gt 0 ]; then
+                REDIS_ERROR_RATE=$(echo "scale=2; $REDIS_FAILED * 100 / $REDIS_REQS" | bc 2>/dev/null || echo "0")
+              else
+                REDIS_ERROR_RATE="N/A"
+              fi
+              
+              # Determine winners
+              determine_winner() {
+                local pg=$1
+                local redis=$2
+                local lower_is_better=$3
+                
+                if [ "$pg" = "N/A" ] || [ "$redis" = "N/A" ]; then
+                  echo "—"
+                elif [ "$lower_is_better" = "true" ]; then
+                  if [ $(echo "$pg < $redis" | bc -l) -eq 1 ]; then
+                    echo "PostgreSQL"
+                  elif [ $(echo "$pg > $redis" | bc -l) -eq 1 ]; then
+                    echo "Redis"
+                  else
+                    echo "Tie"
+                  fi
+                else
+                  if [ $(echo "$pg > $redis" | bc -l) -eq 1 ]; then
+                    echo "PostgreSQL"
+                  elif [ $(echo "$pg < $redis" | bc -l) -eq 1 ]; then
+                    echo "Redis"
+                  else
+                    echo "Tie"
+                  fi
+                fi
+              }
+              
+              DURATION_WINNER=$(determine_winner "$PG_DURATION" "$REDIS_DURATION" "true")
+              REQS_WINNER=$(determine_winner "$PG_REQS" "$REDIS_REQS" "false")
+              ERROR_WINNER=$(determine_winner "$PG_ERROR_RATE" "$REDIS_ERROR_RATE" "true")
+              
+              # Generate report
+              cat > "$REPORT_FILE" << EOF
+              # Load Test Comparison Report
+              
+              ## Test Configuration
+              
+              | Parameter | Value |
+              |-----------|-------|
+              | Scenario | ${{ parameters.scenario }} |
+              | Environment | ${{ parameters.environment }} |
+              | Target URL | $(baseUrl) |
+              | Date | $(date -u +%Y-%m-%d) |
+              | Build ID | $(Build.BuildId) |
+              
+              ---
+              
+              ## Summary Comparison
+              
+              | Metric | PostgreSQL | Redis | Winner |
+              |--------|------------|-------|--------|
+              | Total Requests | $PG_REQS | $REDIS_REQS | $REQS_WINNER |
+              | Avg Response Time | ${PG_DURATION}ms | ${REDIS_DURATION}ms | $DURATION_WINNER |
+              | Error Rate | ${PG_ERROR_RATE}% | ${REDIS_ERROR_RATE}% | $ERROR_WINNER |
+              
+              ---
+              
+              ## Recommendation
+              
+              Based on the test results:
+              
+              EOF
+              
+              # Add recommendation logic
+              if [ "$DURATION_WINNER" = "PostgreSQL" ] && [ "$ERROR_WINNER" = "PostgreSQL" ]; then
+                echo "**PostgreSQL** is recommended for this workload." >> "$REPORT_FILE"
+              elif [ "$DURATION_WINNER" = "Redis" ] && [ "$ERROR_WINNER" = "Redis" ]; then
+                echo "**Redis/BullMQ** is recommended for this workload." >> "$REPORT_FILE"
+              else
+                echo "Results are mixed. Consider running more extensive tests or choosing based on operational preferences." >> "$REPORT_FILE"
+              fi
+              
+              cat >> "$REPORT_FILE" << EOF
+              
+              ---
+              
+              ## Raw Data
+              
+              - PostgreSQL results: \`postgres-results/postgres.json\`
+              - Redis results: \`redis-results/redis.json\`
+              
+              ---
+              
+              ## Next Steps
+              
+              1. Review detailed JSON results for p95/p99 latencies
+              2. Check server resource usage during tests
+              3. Run stress test for breaking point analysis
+              4. Update \`QUEUE_TYPE\` in production based on findings
+              
+              EOF
+              
+              echo "=== Report Generated ==="
+              cat "$REPORT_FILE"
+            displayName: 'Generate comparison report'
+
+          - publish: $(Build.ArtifactStagingDirectory)/COMPARISON-REPORT.md
+            artifact: 'comparison-report'
+            displayName: 'Publish comparison report'

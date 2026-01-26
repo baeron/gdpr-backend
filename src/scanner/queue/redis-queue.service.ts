@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScannerService } from '../scanner.service';
 import { ScannerReportService } from '../scanner-report.service';
-import { IQueueService, QueuedJob, JobStatus, QueueStats } from './queue.interface';
+import {
+  IQueueService,
+  QueuedJob,
+  JobStatus,
+  QueueStats,
+} from './queue.interface';
 
 // Bull queue imports - will be installed when Redis is enabled
 let Queue: any;
@@ -49,13 +54,13 @@ export class RedisQueueService implements IQueueService {
     // Create worker (only if WORKER_ENABLED)
     if (process.env.WORKER_ENABLED !== 'false') {
       const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
-      
+
       this.worker = new Worker(
         QUEUE_NAME,
         async (job: any) => {
           await this.processJob(job);
         },
-        { connection, concurrency }
+        { connection, concurrency },
       );
 
       this.worker.on('completed', (job: any) => {
@@ -103,7 +108,7 @@ export class RedisQueueService implements IQueueService {
       {
         priority: -(job.priority || 0), // Bull uses lower = higher priority
         jobId: dbJob.id,
-      }
+      },
     );
 
     const position = await this.getQueuePosition(dbJob.id);
@@ -117,7 +122,8 @@ export class RedisQueueService implements IQueueService {
 
     if (!job) return null;
 
-    const position = job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
+    const position =
+      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
     return this.formatJobStatus(job, position);
   }
 
@@ -263,7 +269,8 @@ export class RedisQueueService implements IQueueService {
       queuedAt: job.queuedAt,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
-      estimatedWaitMinutes: position && position > 0 ? Math.ceil(position * 1) : null,
+      estimatedWaitMinutes:
+        position && position > 0 ? Math.ceil(position * 1) : null,
     };
   }
 

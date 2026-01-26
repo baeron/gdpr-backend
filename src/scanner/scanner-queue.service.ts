@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
@@ -23,7 +28,7 @@ export interface ScanJobStatus {
   status: string;
   progress: number;
   currentStep: string | null;
-  position: number | null;  // Position in queue (null if not queued)
+  position: number | null; // Position in queue (null if not queued)
   reportId: string | null;
   error: string | null;
   queuedAt: Date;
@@ -104,7 +109,8 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
 
     if (!job) return null;
 
-    const position = job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
+    const position =
+      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
     return this.formatJobStatus(job, position);
   }
 
@@ -185,10 +191,7 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     // Get next job from queue (highest priority, oldest first)
     const nextJob = await (this.prisma as any).scanJob.findFirst({
       where: { status: 'QUEUED' },
-      orderBy: [
-        { priority: 'desc' },
-        { queuedAt: 'asc' },
-      ],
+      orderBy: [{ priority: 'desc' }, { queuedAt: 'asc' }],
     });
 
     if (!nextJob) {
@@ -232,7 +235,10 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
       await this.updateJobProgress(job.id, 90, 'Saving results...');
 
       // Save to database
-      const reportId = await this.reportService.saveScanResult(result, job.auditRequestId);
+      const reportId = await this.reportService.saveScanResult(
+        result,
+        job.auditRequestId,
+      );
 
       // Mark as completed
       await (this.prisma as any).scanJob.update({
@@ -246,8 +252,9 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      this.logger.log(`Job ${job.id} completed successfully. Report: ${reportId}`);
-
+      this.logger.log(
+        `Job ${job.id} completed successfully. Report: ${reportId}`,
+      );
     } catch (error) {
       this.logger.error(`Job ${job.id} failed: ${error.message}`);
 
@@ -264,7 +271,11 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async updateJobProgress(jobId: string, progress: number, step: string) {
+  private async updateJobProgress(
+    jobId: string,
+    progress: number,
+    step: string,
+  ) {
     await (this.prisma as any).scanJob.update({
       where: { id: jobId },
       data: { progress, currentStep: step },
@@ -272,9 +283,10 @@ export class ScannerQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private formatJobStatus(job: any, position: number | null): ScanJobStatus {
-    const estimatedWaitMinutes = position && position > 0 
-      ? Math.ceil(position * 1) // ~1 minute per scan
-      : null;
+    const estimatedWaitMinutes =
+      position && position > 0
+        ? Math.ceil(position * 1) // ~1 minute per scan
+        : null;
 
     return {
       id: job.id,

@@ -100,7 +100,9 @@ describe('HealthController', () => {
       await controller.getReadiness(mockResponse as any);
 
       expect(mockHealthService.getReadiness).toHaveBeenCalled();
-      expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(mockResponse.status).toHaveBeenCalledWith(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
       expect(mockResponse.json).toHaveBeenCalledWith(expectedResult);
     });
   });
@@ -114,7 +116,12 @@ describe('HealthController', () => {
         uptimeFormatted: '1m 40s',
         checks: {
           database: { status: 'healthy', responseTime: 5 },
-          memory: { status: 'healthy', heapUsed: 50, heapTotal: 100, usedPercent: 50 },
+          memory: {
+            status: 'healthy',
+            heapUsed: 50,
+            heapTotal: 100,
+            usedPercent: 50,
+          },
           system: { platform: 'darwin', nodeVersion: 'v18.0.0', pid: 1234 },
         },
       };
@@ -135,7 +142,12 @@ describe('HealthController', () => {
         uptimeFormatted: '1m 40s',
         checks: {
           database: { status: 'unhealthy', error: 'DB error' },
-          memory: { status: 'healthy', heapUsed: 50, heapTotal: 100, usedPercent: 50 },
+          memory: {
+            status: 'healthy',
+            heapUsed: 50,
+            heapTotal: 100,
+            usedPercent: 50,
+          },
           system: { platform: 'darwin', nodeVersion: 'v18.0.0', pid: 1234 },
         },
       };
@@ -144,7 +156,9 @@ describe('HealthController', () => {
       await controller.getDetailedHealth(mockResponse as any);
 
       expect(mockHealthService.getDetailedHealth).toHaveBeenCalled();
-      expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(mockResponse.status).toHaveBeenCalledWith(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
       expect(mockResponse.json).toHaveBeenCalledWith(expectedResult);
     });
   });

@@ -51,7 +51,8 @@ export class ScannerService {
     }
 
     const context = await this.browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
     });
 
@@ -112,33 +113,48 @@ export class ScannerService {
 
       // Phase 1: Analyze BEFORE consent
       this.logger.log('Phase 1: Analyzing before consent...');
-      
-      const cookiesBeforeConsent = await this.cookieAnalyzer.analyzeCookies(page, true);
-      const consentBanner = await this.consentAnalyzer.analyzeConsentBanner(page);
-      const privacyPolicy = await this.privacyPolicyAnalyzer.analyzePrivacyPolicy(page);
+
+      const cookiesBeforeConsent = await this.cookieAnalyzer.analyzeCookies(
+        page,
+        true,
+      );
+      const consentBanner =
+        await this.consentAnalyzer.analyzeConsentBanner(page);
+      const privacyPolicy =
+        await this.privacyPolicyAnalyzer.analyzePrivacyPolicy(page);
 
       // Phase 2: Click accept and analyze AFTER consent
       this.logger.log('Phase 2: Analyzing after consent...');
-      
+
       if (consentBanner.found && consentBanner.hasAcceptButton) {
         consentGiven = true;
         await this.consentAnalyzer.clickAcceptButton(page);
         await page.waitForTimeout(2000);
       }
 
-      const cookiesAfterConsent = await this.cookieAnalyzer.analyzeCookies(page, false);
+      const cookiesAfterConsent = await this.cookieAnalyzer.analyzeCookies(
+        page,
+        false,
+      );
 
       // Merge cookies (mark which were set before consent)
-      const allCookies = this.mergeCookies(cookiesBeforeConsent, cookiesAfterConsent);
+      const allCookies = this.mergeCookies(
+        cookiesBeforeConsent,
+        cookiesAfterConsent,
+      );
 
       // Get all detected trackers
       const trackers = this.trackerAnalyzer.getDetectedTrackers();
 
       // Phase 3: Security analysis
       this.logger.log('Phase 3: Security analysis...');
-      const httpsInfo = await this.securityAnalyzer.analyzeHttps(page, normalizedUrl);
+      const httpsInfo = await this.securityAnalyzer.analyzeHttps(
+        page,
+        normalizedUrl,
+      );
       const mixedContentInfo = this.securityAnalyzer.getMixedContentInfo();
-      const cookieSecurityInfo = this.securityAnalyzer.analyzeCookieSecurity(allCookies);
+      const cookieSecurityInfo =
+        this.securityAnalyzer.analyzeCookieSecurity(allCookies);
 
       const security: SecurityInfo = {
         https: {
@@ -156,7 +172,11 @@ export class ScannerService {
       // Phase 5: Privacy Policy content analysis
       if (privacyPolicy.found && privacyPolicy.url) {
         this.logger.log('Phase 5: Privacy Policy content analysis...');
-        privacyPolicy.content = await this.privacyPolicyAnalyzer.analyzePrivacyPolicyContent(page, privacyPolicy.url);
+        privacyPolicy.content =
+          await this.privacyPolicyAnalyzer.analyzePrivacyPolicyContent(
+            page,
+            privacyPolicy.url,
+          );
       }
 
       // Phase 6: Data Transfer analysis
@@ -170,17 +190,19 @@ export class ScannerService {
 
       // Phase 7: Technology Detection
       this.logger.log('Phase 7: Technology Detection...');
-      const technologies: TechnologyDetectionResult = await this.technologyAnalyzer.analyzePage(page);
-      
+      const technologies: TechnologyDetectionResult =
+        await this.technologyAnalyzer.analyzePage(page);
+
       // Map to simplified FormInfo for response
       const forms: FormsAnalysisResult = {
         totalForms: formsAnalysis.totalForms,
         dataCollectionForms: formsAnalysis.dataCollectionForms,
         formsWithConsent: formsAnalysis.formsWithConsent,
         formsWithoutConsent: formsAnalysis.formsWithoutConsent,
-        formsWithPreCheckedMarketing: formsAnalysis.formsWithPreCheckedMarketing,
+        formsWithPreCheckedMarketing:
+          formsAnalysis.formsWithPreCheckedMarketing,
         formsWithPrivacyLink: formsAnalysis.formsWithPrivacyLink,
-        forms: formsAnalysis.forms.map(f => ({
+        forms: formsAnalysis.forms.map((f) => ({
           type: f.type,
           hasEmailField: f.hasEmailField,
           hasConsentCheckbox: f.hasConsentCheckbox,
@@ -199,7 +221,7 @@ export class ScannerService {
         privacyPolicy,
         security,
         forms,
-        dataTransfers
+        dataTransfers,
       );
 
       // Calculate overall risk level and score
@@ -207,7 +229,9 @@ export class ScannerService {
       const score = this.calculateScore(issues);
 
       const scanDurationMs = Date.now() - startTime;
-      this.logger.log(`Scan completed in ${scanDurationMs}ms. Score: ${score}/100`);
+      this.logger.log(
+        `Scan completed in ${scanDurationMs}ms. Score: ${score}/100`,
+      );
 
       return {
         websiteUrl: normalizedUrl,
@@ -216,17 +240,18 @@ export class ScannerService {
         overallRiskLevel,
         cookies: {
           total: allCookies.length,
-          beforeConsent: allCookies.filter(c => c.setBeforeConsent).length,
+          beforeConsent: allCookies.filter((c) => c.setBeforeConsent).length,
           list: allCookies,
         },
         trackers: {
           total: trackers.length,
-          beforeConsent: trackers.filter(t => t.loadedBeforeConsent).length,
+          beforeConsent: trackers.filter((t) => t.loadedBeforeConsent).length,
           list: trackers,
         },
         thirdPartyRequests: {
           total: thirdPartyRequests.length,
-          beforeConsent: thirdPartyRequests.filter(r => r.beforeConsent).length,
+          beforeConsent: thirdPartyRequests.filter((r) => r.beforeConsent)
+            .length,
           list: thirdPartyRequests.slice(0, 50), // Limit to 50 for response size
         },
         consentBanner,
@@ -259,7 +284,10 @@ export class ScannerService {
     return normalizeD(requestDomain).endsWith(normalizeD(baseDomain));
   }
 
-  private mergeCookies(before: CookieInfo[], after: CookieInfo[]): CookieInfo[] {
+  private mergeCookies(
+    before: CookieInfo[],
+    after: CookieInfo[],
+  ): CookieInfo[] {
     const cookieMap = new Map<string, CookieInfo>();
 
     // Add cookies from before consent
@@ -286,13 +314,13 @@ export class ScannerService {
     privacyPolicy: PrivacyPolicyInfo,
     security: SecurityInfo,
     forms: FormsAnalysisResult,
-    dataTransfers: DataTransferInfo
+    dataTransfers: DataTransferInfo,
   ): ScanIssue[] {
     const issues: ScanIssue[] = [];
 
     // Check for non-essential cookies before consent
     const nonEssentialBeforeConsent = cookies.filter(
-      c => c.setBeforeConsent && c.category !== 'necessary'
+      (c) => c.setBeforeConsent && c.category !== 'necessary',
     );
     if (nonEssentialBeforeConsent.length > 0) {
       issues.push({
@@ -300,19 +328,21 @@ export class ScannerService {
         title: 'Non-essential cookies set before consent',
         description: `${nonEssentialBeforeConsent.length} non-essential cookie(s) were set before user consent was obtained.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Ensure all non-essential cookies are only set after obtaining explicit user consent.',
+        recommendation:
+          'Ensure all non-essential cookies are only set after obtaining explicit user consent.',
       });
     }
 
     // Check for trackers before consent
-    const trackersBeforeConsent = trackers.filter(t => t.loadedBeforeConsent);
+    const trackersBeforeConsent = trackers.filter((t) => t.loadedBeforeConsent);
     if (trackersBeforeConsent.length > 0) {
       issues.push({
         code: 'TRACKERS_BEFORE_CONSENT',
         title: 'Tracking scripts loaded before consent',
-        description: `${trackersBeforeConsent.length} tracking script(s) were loaded before user consent: ${trackersBeforeConsent.map(t => t.name).join(', ')}.`,
+        description: `${trackersBeforeConsent.length} tracking script(s) were loaded before user consent: ${trackersBeforeConsent.map((t) => t.name).join(', ')}.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Delay loading of all tracking scripts until user consent is obtained.',
+        recommendation:
+          'Delay loading of all tracking scripts until user consent is obtained.',
       });
     }
 
@@ -323,7 +353,8 @@ export class ScannerService {
         title: 'No cookie consent banner detected',
         description: 'No cookie consent mechanism was detected on the website.',
         riskLevel: RiskLevel.CRITICAL,
-        recommendation: 'Implement a GDPR-compliant cookie consent banner that appears before any non-essential cookies are set.',
+        recommendation:
+          'Implement a GDPR-compliant cookie consent banner that appears before any non-essential cookies are set.',
       });
     }
 
@@ -332,9 +363,11 @@ export class ScannerService {
       issues.push({
         code: 'NO_REJECT_OPTION',
         title: 'No option to reject cookies',
-        description: 'The consent banner does not provide an easy way to reject non-essential cookies.',
+        description:
+          'The consent banner does not provide an easy way to reject non-essential cookies.',
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Add a clearly visible "Reject" or "Decline" button to the consent banner.',
+        recommendation:
+          'Add a clearly visible "Reject" or "Decline" button to the consent banner.',
       });
     }
 
@@ -345,32 +378,38 @@ export class ScannerService {
         title: 'No privacy policy link found',
         description: 'No link to a privacy policy was detected on the website.',
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Add a clearly visible link to your privacy policy in the footer and consent banner.',
+        recommendation:
+          'Add a clearly visible link to your privacy policy in the footer and consent banner.',
       });
     }
 
     // Check for third-party requests before consent
-    const thirdPartyBeforeConsent = thirdPartyRequests.filter(r => r.beforeConsent);
+    const thirdPartyBeforeConsent = thirdPartyRequests.filter(
+      (r) => r.beforeConsent,
+    );
     if (thirdPartyBeforeConsent.length > 10) {
       issues.push({
         code: 'EXCESSIVE_THIRD_PARTY',
         title: 'Excessive third-party requests before consent',
         description: `${thirdPartyBeforeConsent.length} third-party requests were made before user consent.`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Review and minimize third-party requests that occur before user consent.',
+        recommendation:
+          'Review and minimize third-party requests that occur before user consent.',
       });
     }
 
     // Security issues
-    
+
     // Check HTTPS
     if (!security.https.enabled) {
       issues.push({
         code: 'NO_HTTPS',
         title: 'Website not using HTTPS',
-        description: 'The website is not served over a secure HTTPS connection.',
+        description:
+          'The website is not served over a secure HTTPS connection.',
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Enable HTTPS with a valid SSL/TLS certificate to encrypt data in transit.',
+        recommendation:
+          'Enable HTTPS with a valid SSL/TLS certificate to encrypt data in transit.',
       });
     }
 
@@ -381,7 +420,8 @@ export class ScannerService {
         title: 'Mixed content detected',
         description: `${security.mixedContent.resources.length} resource(s) are loaded over insecure HTTP on an HTTPS page.`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Ensure all resources (scripts, images, stylesheets) are loaded over HTTPS.',
+        recommendation:
+          'Ensure all resources (scripts, images, stylesheets) are loaded over HTTPS.',
       });
     }
 
@@ -392,7 +432,8 @@ export class ScannerService {
         title: 'Cookies with excessive lifetime',
         description: `${security.cookieSecurity.excessiveExpiration} cookie(s) have a lifetime exceeding 13 months (CNIL guideline).`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Reduce cookie lifetime to maximum 13 months as recommended by CNIL.',
+        recommendation:
+          'Reduce cookie lifetime to maximum 13 months as recommended by CNIL.',
       });
     }
 
@@ -403,7 +444,8 @@ export class ScannerService {
         title: 'Cookies missing Secure flag',
         description: `${security.cookieSecurity.withoutSecure} cookie(s) are missing the Secure flag on an HTTPS site.`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Add the Secure flag to all cookies to ensure they are only sent over HTTPS.',
+        recommendation:
+          'Add the Secure flag to all cookies to ensure they are only sent over HTTPS.',
       });
     }
 
@@ -414,12 +456,13 @@ export class ScannerService {
         title: 'Cookies missing SameSite attribute',
         description: `${security.cookieSecurity.withoutSameSite} cookie(s) are missing the SameSite attribute.`,
         riskLevel: RiskLevel.LOW,
-        recommendation: 'Add SameSite=Lax or SameSite=Strict to cookies for CSRF protection.',
+        recommendation:
+          'Add SameSite=Lax or SameSite=Strict to cookies for CSRF protection.',
       });
     }
 
     // Consent Quality issues (Phase 3)
-    
+
     // Check for pre-checked non-essential boxes
     if (consentBanner.found && consentBanner.quality.hasPreCheckedBoxes) {
       issues.push({
@@ -427,7 +470,8 @@ export class ScannerService {
         title: 'Non-essential cookies pre-selected',
         description: `Non-essential cookie categories are pre-checked: ${consentBanner.quality.preCheckedCategories.join(', ')}.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'All non-essential cookie categories must be unchecked by default. Only "necessary" cookies can be pre-selected.',
+        recommendation:
+          'All non-essential cookie categories must be unchecked by default. Only "necessary" cookies can be pre-selected.',
       });
     }
 
@@ -436,9 +480,11 @@ export class ScannerService {
       issues.push({
         code: 'UNEQUAL_BUTTON_PROMINENCE',
         title: 'Accept and Reject buttons have unequal prominence',
-        description: 'The "Accept" button is significantly more prominent than the "Reject" option, which may manipulate user choice.',
+        description:
+          'The "Accept" button is significantly more prominent than the "Reject" option, which may manipulate user choice.',
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Make the "Reject" button equally visible and accessible as the "Accept" button (similar size, color, and position).',
+        recommendation:
+          'Make the "Reject" button equally visible and accessible as the "Accept" button (similar size, color, and position).',
       });
     }
 
@@ -447,20 +493,28 @@ export class ScannerService {
       issues.push({
         code: 'COOKIE_WALL',
         title: 'Cookie wall detected',
-        description: 'The website blocks access to content until cookies are accepted, with no option to reject or customize.',
+        description:
+          'The website blocks access to content until cookies are accepted, with no option to reject or customize.',
         riskLevel: RiskLevel.CRITICAL,
-        recommendation: 'Remove the cookie wall. Users must be able to access the website without accepting non-essential cookies.',
+        recommendation:
+          'Remove the cookie wall. Users must be able to access the website without accepting non-essential cookies.',
       });
     }
 
     // Check for lack of granular consent
-    if (consentBanner.found && !consentBanner.quality.hasGranularConsent && consentBanner.hasAcceptButton) {
+    if (
+      consentBanner.found &&
+      !consentBanner.quality.hasGranularConsent &&
+      consentBanner.hasAcceptButton
+    ) {
       issues.push({
         code: 'NO_GRANULAR_CONSENT',
         title: 'No granular cookie consent options',
-        description: 'The consent banner does not allow users to choose which cookie categories to accept.',
+        description:
+          'The consent banner does not allow users to choose which cookie categories to accept.',
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Provide options to accept/reject different cookie categories (e.g., Analytics, Marketing, Functional).',
+        recommendation:
+          'Provide options to accept/reject different cookie categories (e.g., Analytics, Marketing, Functional).',
       });
     }
 
@@ -473,7 +527,8 @@ export class ScannerService {
           title: 'Privacy policy missing required information',
           description: `The privacy policy is missing: ${privacyPolicy.content.missingElements.join(', ')}.`,
           riskLevel: RiskLevel.HIGH,
-          recommendation: 'Update your privacy policy to include all required GDPR Art. 13-14 elements.',
+          recommendation:
+            'Update your privacy policy to include all required GDPR Art. 13-14 elements.',
         });
       }
 
@@ -482,9 +537,11 @@ export class ScannerService {
         issues.push({
           code: 'NO_DATA_RETENTION_INFO',
           title: 'No data retention period specified',
-          description: 'The privacy policy does not specify how long personal data is retained.',
+          description:
+            'The privacy policy does not specify how long personal data is retained.',
           riskLevel: RiskLevel.MEDIUM,
-          recommendation: 'Add clear information about data retention periods for each type of data processing.',
+          recommendation:
+            'Add clear information about data retention periods for each type of data processing.',
         });
       }
 
@@ -493,15 +550,17 @@ export class ScannerService {
         issues.push({
           code: 'NO_COMPLAINT_RIGHT_INFO',
           title: 'No information about right to complain',
-          description: 'The privacy policy does not mention the right to lodge a complaint with a supervisory authority.',
+          description:
+            'The privacy policy does not mention the right to lodge a complaint with a supervisory authority.',
           riskLevel: RiskLevel.MEDIUM,
-          recommendation: 'Add information about the right to complain to the relevant data protection authority.',
+          recommendation:
+            'Add information about the right to complain to the relevant data protection authority.',
         });
       }
     }
 
     // Form issues (Phase 4)
-    
+
     // Check for forms without consent
     if (forms.formsWithoutConsent > 0) {
       issues.push({
@@ -509,7 +568,8 @@ export class ScannerService {
         title: 'Data collection forms without consent checkbox',
         description: `${forms.formsWithoutConsent} form(s) collect personal data without a consent checkbox.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Add a consent checkbox to all forms that collect personal data (email, name, phone).',
+        recommendation:
+          'Add a consent checkbox to all forms that collect personal data (email, name, phone).',
       });
     }
 
@@ -520,24 +580,27 @@ export class ScannerService {
         title: 'Marketing consent pre-checked in forms',
         description: `${forms.formsWithPreCheckedMarketing} form(s) have marketing/newsletter consent pre-checked.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'Marketing consent checkboxes must be unchecked by default. Users must actively opt-in.',
+        recommendation:
+          'Marketing consent checkboxes must be unchecked by default. Users must actively opt-in.',
       });
     }
 
     // Check for forms without privacy policy link
-    const dataFormsWithoutPrivacy = forms.dataCollectionForms - forms.formsWithPrivacyLink;
+    const dataFormsWithoutPrivacy =
+      forms.dataCollectionForms - forms.formsWithPrivacyLink;
     if (dataFormsWithoutPrivacy > 0 && forms.dataCollectionForms > 0) {
       issues.push({
         code: 'FORMS_NO_PRIVACY_LINK',
         title: 'Forms missing privacy policy link',
         description: `${dataFormsWithoutPrivacy} data collection form(s) do not link to the privacy policy.`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Add a link to your privacy policy near all forms that collect personal data.',
+        recommendation:
+          'Add a link to your privacy policy near all forms that collect personal data.',
       });
     }
 
     // Data Transfer issues (Phase 6)
-    
+
     // Check for high-risk US data transfers
     if (dataTransfers.highRiskTransfers.length > 0) {
       issues.push({
@@ -545,7 +608,8 @@ export class ScannerService {
         title: 'Data transfers to US-based services',
         description: `${dataTransfers.highRiskTransfers.length} US-based analytics/advertising service(s) detected: ${dataTransfers.highRiskTransfers.slice(0, 5).join(', ')}${dataTransfers.highRiskTransfers.length > 5 ? '...' : ''}.`,
         riskLevel: RiskLevel.HIGH,
-        recommendation: 'After Schrems II, transfers to US require additional safeguards (SCCs, supplementary measures). Consider EU-based alternatives or ensure proper legal basis.',
+        recommendation:
+          'After Schrems II, transfers to US require additional safeguards (SCCs, supplementary measures). Consider EU-based alternatives or ensure proper legal basis.',
       });
     }
 
@@ -556,7 +620,8 @@ export class ScannerService {
         title: 'Excessive number of US-based services',
         description: `${dataTransfers.totalUSServices} US-based services detected. This increases data transfer compliance complexity.`,
         riskLevel: RiskLevel.MEDIUM,
-        recommendation: 'Review and minimize the number of US-based third-party services. Consider EU-based alternatives where possible.',
+        recommendation:
+          'Review and minimize the number of US-based third-party services. Consider EU-based alternatives where possible.',
       });
     }
 
@@ -564,13 +629,13 @@ export class ScannerService {
   }
 
   private calculateOverallRisk(issues: ScanIssue[]): RiskLevel {
-    if (issues.some(i => i.riskLevel === RiskLevel.CRITICAL)) {
+    if (issues.some((i) => i.riskLevel === RiskLevel.CRITICAL)) {
       return RiskLevel.CRITICAL;
     }
-    if (issues.some(i => i.riskLevel === RiskLevel.HIGH)) {
+    if (issues.some((i) => i.riskLevel === RiskLevel.HIGH)) {
       return RiskLevel.HIGH;
     }
-    if (issues.some(i => i.riskLevel === RiskLevel.MEDIUM)) {
+    if (issues.some((i) => i.riskLevel === RiskLevel.MEDIUM)) {
       return RiskLevel.MEDIUM;
     }
     return RiskLevel.LOW;
