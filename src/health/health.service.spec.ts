@@ -78,7 +78,18 @@ describe('HealthService', () => {
     it('should return detailed health status when all checks pass', async () => {
       mockPrismaService.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
 
+      // Mock process.memoryUsage to ensure consistent results in CI
+      const mockMemoryUsage = jest.spyOn(process, 'memoryUsage').mockReturnValue({
+        heapUsed: 50 * 1024 * 1024, // 50 MB
+        heapTotal: 100 * 1024 * 1024, // 100 MB (50% usage - healthy)
+        external: 0,
+        arrayBuffers: 0,
+        rss: 150 * 1024 * 1024,
+      });
+
       const result = await service.getDetailedHealth();
+
+      mockMemoryUsage.mockRestore();
 
       expect(result.status).toBe('healthy');
       expect(result.timestamp).toBeDefined();
