@@ -21,7 +21,7 @@ parameters:
     default: 'dev'
     values:
       - dev
-      - prod
+      # - prod  # Add when production load testing is enabled
 
   - name: queueType
     displayName: 'Queue Type to Test'
@@ -42,10 +42,8 @@ parameters:
     default: ''
 
 variables:
-  ${{ if eq(parameters.environment, 'dev') }}:
-    baseUrl: 'https://dev.api.policytracker.eu'
-  ${{ else }}:
-    baseUrl: 'https://api.policytracker.eu'
+  # Currently only dev environment is configured
+  baseUrl: 'https://dev.api.policytracker.eu'
 
 pool:
   vmImage: 'ubuntu-latest'
