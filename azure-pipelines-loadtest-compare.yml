@@ -35,7 +35,7 @@ variables:
   - group: vultr-deployment
   - group: gdpr-secrets-dev
   - name: baseUrl
-    value: 'https://dev.api.policytracker.eu'
+    value: 'https://api.dev.policytracker.eu'
   - name: apiContainer
     value: 'gdpr-api-dev'
   - name: composeFile

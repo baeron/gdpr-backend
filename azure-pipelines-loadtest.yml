@@ -43,7 +43,7 @@ parameters:
 
 variables:
   # Currently only dev environment is configured
-  baseUrl: 'https://dev.api.policytracker.eu'
+  baseUrl: 'https://api.dev.policytracker.eu'
 
 pool:
   vmImage: 'ubuntu-latest'
