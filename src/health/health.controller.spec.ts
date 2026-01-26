@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpStatus } from '@nestjs/common';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
+import { QUEUE_SERVICE } from '../scanner/queue/queue.interface';
 
 describe('HealthController', () => {
   let controller: HealthController;
@@ -12,6 +13,15 @@ describe('HealthController', () => {
     getLiveness: jest.fn(),
     getReadiness: jest.fn(),
     getDetailedHealth: jest.fn(),
+  };
+
+  const mockQueueService = {
+    getStats: jest.fn(),
+    addJob: jest.fn(),
+    getJobStatus: jest.fn(),
+    cancelJob: jest.fn(),
+    startWorker: jest.fn(),
+    stopWorker: jest.fn(),
   };
 
   const mockResponse = {
@@ -26,6 +36,10 @@ describe('HealthController', () => {
         {
           provide: HealthService,
           useValue: mockHealthService,
+        },
+        {
+          provide: QUEUE_SERVICE,
+          useValue: mockQueueService,
         },
       ],
     }).compile();
@@ -160,6 +174,30 @@ describe('HealthController', () => {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
       expect(mockResponse.json).toHaveBeenCalledWith(expectedResult);
+    });
+  });
+
+  describe('getQueueStats', () => {
+    it('should return queue statistics', async () => {
+      const mockStats = {
+        queued: 5,
+        processing: 2,
+        completed: 100,
+        failed: 3,
+        maxConcurrent: 1,
+        estimatedWaitPerJob: 30,
+      };
+      mockQueueService.getStats.mockResolvedValue(mockStats);
+
+      const result = await controller.getQueueStats();
+
+      expect(mockQueueService.getStats).toHaveBeenCalled();
+      expect(result.queued).toBe(5);
+      expect(result.processing).toBe(2);
+      expect(result.completed).toBe(100);
+      expect(result.failed).toBe(3);
+      expect(result.queueType).toBeDefined();
+      expect(result.timestamp).toBeDefined();
     });
   });
 });
