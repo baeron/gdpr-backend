@@ -7,10 +7,14 @@ describe('HealthService', () => {
   let prismaService: PrismaService;
 
   const mockPrismaService = {
-    $queryRaw: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   };
 
   beforeEach(async () => {
+    // Reset mock to default successful response before each test
+    mockPrismaService.$queryRaw.mockReset();
+    mockPrismaService.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         HealthService,
@@ -23,10 +27,6 @@ describe('HealthService', () => {
 
     service = module.get<HealthService>(HealthService);
     prismaService = module.get<PrismaService>(PrismaService);
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
   });
 
   describe('getHealth', () => {
