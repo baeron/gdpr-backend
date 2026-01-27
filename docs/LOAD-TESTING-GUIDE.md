@@ -327,6 +327,54 @@ From initial testing:
 
 ---
 
+## Load Test Results (January 2026)
+
+### Breakpoint Test Results
+
+**Test Date**: 2026-01-27  
+**Environment**: Dev (api.dev.policytracker.eu)  
+**Endpoint**: `/api/scanner/queue` (async)
+
+#### Summary
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Error Rate | 1.21% | ✅ Pass (<10%) |
+| p95 Response Time | 8.08s | ⚠️ Under heavy load |
+| Median Response Time | 11ms | ✅ Excellent |
+| Throughput | 29 req/s | ✅ Good |
+| Total Requests | 14,348 | - |
+| Success Rate | 98.78% | ✅ Excellent |
+
+#### Capacity Limits
+
+| Load Level | req/s | Performance | Recommendation |
+|------------|-------|-------------|----------------|
+| Light | 0-30 | ✅ Stable, <100ms | Safe for production |
+| Medium | 30-50 | ⚠️ Some delays | Monitor closely |
+| Heavy | 50-75 | ⚠️ p95 ~4-5s | Scale if needed |
+| Stress | 75-100 | ❌ p95 ~8s | Not recommended |
+
+#### Before vs After (Sync vs Async)
+
+| Metric | Sync `/scan` | Async `/queue` | Improvement |
+|--------|--------------|----------------|-------------|
+| Error Rate | 71.93% | 1.21% | **60x better** |
+| p95 Response | 30s | 8s (med: 11ms) | **~3x better** |
+| Throughput | ~5 req/s | ~29 req/s | **6x better** |
+| Success Rate | 18% | 98.78% | **5x better** |
+
+#### Recommendations
+
+1. **Use async endpoint** (`/api/scanner/queue`) for all production traffic
+2. **Safe capacity**: Up to 30 concurrent requests/second
+3. **Scaling options**:
+   - Increase `MAX_CONCURRENT_SCANS` from 1 to 2-3
+   - Add horizontal scaling (multiple API instances)
+   - Switch to Redis queue for higher throughput
+
+---
+
 ## Production Readiness Checklist
 
 Before production launch, complete these tests:
