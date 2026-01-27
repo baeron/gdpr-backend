@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { chromium, Browser, Page, Request } from 'playwright';
+import { chromium, Browser, Request } from 'playwright';
 import { CookieAnalyzer } from './analyzers/cookie.analyzer';
 import { TrackerAnalyzer } from './analyzers/tracker.analyzer';
 import { ConsentAnalyzer } from './analyzers/consent.analyzer';
@@ -25,6 +25,7 @@ import {
 export class ScannerService {
   private readonly logger = new Logger(ScannerService.name);
   private browser: Browser | null = null;
+  private browserLock = false;
 
   private readonly cookieAnalyzer = new CookieAnalyzer();
   private readonly trackerAnalyzer = new TrackerAnalyzer();
@@ -35,22 +36,78 @@ export class ScannerService {
   private readonly dataTransferAnalyzer = new DataTransferAnalyzer();
   private readonly technologyAnalyzer = new TechnologyAnalyzer();
 
-  async scanWebsite(url: string): Promise<ScanResultDto> {
+  /**
+   * Initialize or reinitialize the browser instance
+   * Handles browser crashes by creating a new instance
+   */
+  private async ensureBrowser(): Promise<Browser> {
+    // Wait if another request is initializing the browser
+    while (this.browserLock) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Check if browser is healthy
+    if (this.browser) {
+      try {
+        // Test if browser is still alive by checking if it's connected
+        if (this.browser.isConnected()) {
+          return this.browser;
+        }
+        this.logger.warn('Browser disconnected, will reinitialize');
+      } catch {
+        this.logger.warn('Browser check failed, will reinitialize');
+      }
+      // Browser is dead, close it properly
+      await this.closeBrowser();
+    }
+
+    // Initialize new browser
+    this.browserLock = true;
+    try {
+      this.logger.log('Initializing new browser instance...');
+      this.browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage', // Prevent /dev/shm issues in Docker
+          '--disable-gpu',
+        ],
+      });
+      this.logger.log('Browser initialized successfully');
+      return this.browser;
+    } finally {
+      this.browserLock = false;
+    }
+  }
+
+  /**
+   * Safely close the browser instance
+   */
+  private async closeBrowser(): Promise<void> {
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(`Error closing browser: ${message}`);
+      }
+      this.browser = null;
+    }
+  }
+
+  async scanWebsite(url: string, retryCount = 0): Promise<ScanResultDto> {
     const startTime = Date.now();
     this.logger.log(`Starting scan for ${url}`);
 
     // Normalize URL
     const normalizedUrl = this.normalizeUrl(url);
 
-    // Initialize browser
-    if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-    }
+    // Initialize browser with recovery
+    const browser = await this.ensureBrowser();
 
-    const context = await this.browser.newContext({
+    const context = await browser.newContext({
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
@@ -263,11 +320,47 @@ export class ScannerService {
         issues,
         score,
       };
-    } catch (error) {
-      this.logger.error(`Scan failed for ${url}: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Scan failed for ${url}: ${errorMessage}`);
+
+      // Check if this is a browser crash error
+      const isBrowserError =
+        errorMessage.includes('browser has been closed') ||
+        errorMessage.includes('Target page, context or browser') ||
+        errorMessage.includes('Browser closed') ||
+        errorMessage.includes('Protocol error');
+
+      if (isBrowserError) {
+        this.logger.warn('Browser crashed, resetting browser instance...');
+        await this.closeBrowser();
+
+        // Retry once if browser crashed
+        if (retryCount < 1) {
+          this.logger.log(
+            `Retrying scan for ${url} (attempt ${retryCount + 2})`,
+          );
+          // Close current context before retrying
+          try {
+            await context.close();
+          } catch {
+            // Ignore close errors
+          }
+          return this.scanWebsite(url, retryCount + 1);
+        }
+      }
+
       throw error;
     } finally {
-      await context.close();
+      // Always close context
+      try {
+        await context.close();
+      } catch (closeError: unknown) {
+        const msg =
+          closeError instanceof Error ? closeError.message : 'Unknown error';
+        this.logger.warn(`Error closing context: ${msg}`);
+      }
     }
   }
 
@@ -665,8 +758,6 @@ export class ScannerService {
   }
 
   async onModuleDestroy() {
-    if (this.browser) {
-      await this.browser.close();
-    }
+    await this.closeBrowser();
   }
 }
