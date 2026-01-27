@@ -80,21 +80,21 @@ export default function () {
     'queue stats OK': (r) => r.status === 200,
   });
 
-  // 3. Submit scan
+  // 3. Submit scan (async queue - returns immediately)
   const website = TEST_WEBSITES[Math.floor(Math.random() * TEST_WEBSITES.length)];
   
   const scanRes = http.post(
-    `${BASE_URL}/api/scanner/scan`,
+    `${BASE_URL}/api/scanner/queue`,
     JSON.stringify({ websiteUrl: website }),
     {
       headers: { 'Content-Type': 'application/json' },
       tags: { name: 'scan' },
-      timeout: '30s',
+      timeout: '10s',
     }
   );
   
   const scanOk = check(scanRes, {
-    'scan submitted': (r) => r.status === 200 || r.status === 201,
+    'scan queued': (r) => r.status === 200 || r.status === 201,
   });
   
   if (!scanOk) hasError = true;

@@ -67,9 +67,9 @@ const TEST_WEBSITES = [
 export default function () {
   const website = TEST_WEBSITES[Math.floor(Math.random() * TEST_WEBSITES.length)];
   
-  // 1. Submit scan request
+  // 1. Submit scan request (async queue - returns immediately)
   const submitRes = http.post(
-    `${BASE_URL}/api/scanner/scan`,
+    `${BASE_URL}/api/scanner/queue`,
     JSON.stringify({ websiteUrl: website }),
     {
       headers: { 'Content-Type': 'application/json' },
@@ -78,11 +78,11 @@ export default function () {
   );
 
   check(submitRes, {
-    'scan submitted': (r) => r.status === 201 || r.status === 200,
+    'scan queued': (r) => r.status === 201 || r.status === 200,
     'has job id': (r) => {
       try {
         const body = JSON.parse(r.body);
-        return body.jobId !== undefined;
+        return body.id !== undefined;
       } catch {
         return false;
       }
@@ -92,23 +92,23 @@ export default function () {
   scanRequests.add(1);
 
   if (submitRes.status === 201 || submitRes.status === 200) {
-    const jobId = JSON.parse(submitRes.body).jobId;
+    const jobId = JSON.parse(submitRes.body).id;
     
     // 2. Poll for job status
     let attempts = 0;
-    const maxAttempts = 30;
+    const maxAttempts = 60; // Allow up to 60 seconds for scan
     const startTime = Date.now();
     
     while (attempts < maxAttempts) {
       const statusRes = http.get(
-        `${BASE_URL}/api/scanner/status/${jobId}`,
+        `${BASE_URL}/api/scanner/job/${jobId}`,
         { tags: { name: 'check_status' } }
       );
       
       if (statusRes.status === 200) {
         const status = JSON.parse(statusRes.body);
         
-        if (status.status === 'completed' || status.status === 'failed') {
+        if (status.status === 'COMPLETED' || status.status === 'FAILED') {
           scanDuration.add(Date.now() - startTime);
           break;
         }

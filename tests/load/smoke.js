@@ -34,9 +34,9 @@ export default function () {
     'queue stats OK': (r) => r.status === 200,
   });
 
-  // 3. Submit a scan
+  // 3. Submit a scan (async queue - returns immediately)
   const scanRes = http.post(
-    `${BASE_URL}/api/scanner/scan`,
+    `${BASE_URL}/api/scanner/queue`,
     JSON.stringify({ websiteUrl: 'https://example.com' }),
     {
       headers: { 'Content-Type': 'application/json' },
@@ -45,7 +45,12 @@ export default function () {
   );
   
   check(scanRes, {
-    'scan submitted': (r) => r.status === 200 || r.status === 201,
+    'scan queued': (r) => r.status === 200 || r.status === 201,
+    'has job id': (r) => {
+      try {
+        return JSON.parse(r.body).id !== undefined;
+      } catch { return false; }
+    },
   });
 
   sleep(1);

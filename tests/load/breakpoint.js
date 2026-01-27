@@ -44,20 +44,25 @@ const TEST_WEBSITES = [
 export default function () {
   const start = Date.now();
   
-  // Submit scan
+  // Submit scan (async queue - returns immediately)
   const website = TEST_WEBSITES[Math.floor(Math.random() * TEST_WEBSITES.length)];
   
   const res = http.post(
-    `${BASE_URL}/api/scanner/scan`,
+    `${BASE_URL}/api/scanner/queue`,
     JSON.stringify({ websiteUrl: website }),
     {
       headers: { 'Content-Type': 'application/json' },
-      timeout: '30s',
+      timeout: '10s',
     }
   );
   
   const success = check(res, {
-    'status 200/201': (r) => r.status === 200 || r.status === 201,
+    'scan queued': (r) => r.status === 200 || r.status === 201,
+    'has job id': (r) => {
+      try {
+        return JSON.parse(r.body).id !== undefined;
+      } catch { return false; }
+    },
   });
   
   errorRate.add(!success);
