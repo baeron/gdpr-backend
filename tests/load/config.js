@@ -2,7 +2,7 @@
 
 export const environments = {
   local: 'http://localhost:3000',
-  dev: 'https://dev.api.policytracker.eu',
+  dev: 'https://api.dev.policytracker.eu',
   prod: 'https://api.policytracker.eu',
 };
 

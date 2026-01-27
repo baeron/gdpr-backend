@@ -58,12 +58,14 @@ sudo apt-get install k6
 
 ## Test Scripts
 
-| Script | Description |
-|--------|-------------|
-| `smoke.js` | Quick verification (5 VUs, 30s) |
-| `queue-stats.js` | Test queue stats endpoint |
-| `scan-queue.js` | Full load/stress test with scenarios |
-| `config.js` | Shared configuration |
+| Script | Description | Duration | VUs |
+|--------|-------------|----------|-----|
+| `smoke.js` | Quick verification | 30s | 5 |
+| `queue-stats.js` | Test queue stats endpoint | 1m | 10 |
+| `scan-queue.js` | Full load/stress test | ~33m | up to 500 |
+| `spike.js` | Sudden traffic bursts | ~9m | up to 300 |
+| `soak.js` | Long-running memory leak test | 1-4h | 30 |
+| `config.js` | Shared configuration | - | - |
 
 ## Quick Start
 
@@ -99,6 +101,35 @@ Contains three scenarios that run sequentially:
 1. **Smoke** (0s-30s): 1 VU, basic verification
 2. **Load** (30s-10m): Ramps from 0 to 100 VUs
 3. **Stress** (10m-33m): Ramps up to 500 VUs
+
+### Spike Test (spike.js)
+Simulates sudden traffic bursts (marketing campaigns, viral posts):
+
+1. Warm up: 10 VUs
+2. **First spike**: Jump to 200 VUs (3 min)
+3. Recovery: Back to 10 VUs
+4. **Second spike**: Jump to 300 VUs (3 min)
+5. Ramp down
+
+```bash
+k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/spike.js
+```
+
+### Soak/Endurance Test (soak.js)
+Long-running test to detect memory leaks and degradation:
+
+- Default: 30 VUs for 1 hour
+- Customizable: `--env DURATION=4h --env VUS=50`
+- Monitors response time degradation over time
+- Checks for memory leaks by comparing start vs end performance
+
+```bash
+# 1 hour soak test
+k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/soak.js
+
+# 4 hour soak test with 50 users
+k6 run --env BASE_URL=https://api.dev.policytracker.eu --env DURATION=4h --env VUS=50 tests/load/soak.js
+```
 
 ## Running Tests
 
