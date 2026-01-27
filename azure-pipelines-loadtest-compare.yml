@@ -101,22 +101,43 @@ stages:
                 
                 echo "=== Switching to PostgreSQL queue ==="
                 
-                # Update env file
-                sed -i 's/QUEUE_TYPE=redis/QUEUE_TYPE=postgres/' $(envFile) || true
-                grep -q "QUEUE_TYPE" $(envFile) || echo "QUEUE_TYPE=postgres" >> $(envFile)
+                # Update env file - set QUEUE_TYPE to postgres
+                if grep -q "QUEUE_TYPE" .env.devprod; then
+                  sed -i 's/QUEUE_TYPE=.*/QUEUE_TYPE=postgres/' .env.devprod
+                else
+                  echo "QUEUE_TYPE=postgres" >> .env.devprod
+                fi
                 
-                # Restart API container
-                docker-compose --env-file $(envFile) -f $(composeFile) restart api-dev || \
-                docker-compose --env-file $(envFile) -f $(composeFile) up -d api-dev
+                echo "Current env:"
+                grep -E "QUEUE_TYPE|REDIS" .env.devprod || true
+                
+                # Stop and remove container to pick up new env
+                docker stop gdpr-api-dev 2>/dev/null || true
+                docker rm gdpr-api-dev 2>/dev/null || true
+                
+                # Recreate container with new env
+                docker run -d \
+                  --name gdpr-api-dev \
+                  --network gdpr-backend_default \
+                  -p 127.0.0.1:3001:3000 \
+                  --env-file .env.devprod \
+                  -e DATABASE_URL="postgresql://gdpr_dev:gdpr_dev@gdpr-postgres:5432/gdpr_audit?schema=dev" \
+                  gdpr-backend_api-dev \
+                  sh -c "npx prisma migrate deploy && npm run start:prod"
                 
                 # Wait for healthy
-                for i in {1..30}; do
+                echo "Waiting for API to be healthy..."
+                for i in {1..60}; do
                   if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
-                    echo "API is healthy"
+                    echo "API is healthy after $i seconds"
                     break
                   fi
-                  echo "Waiting... ($i/30)"
-                  sleep 2
+                  if [ "$i" -eq 60 ]; then
+                    echo "ERROR: API did not become healthy"
+                    docker logs gdpr-api-dev --tail 50
+                    exit 1
+                  fi
+                  sleep 1
                 done
                 
                 # Verify queue type
@@ -208,27 +229,64 @@ stages:
                 
                 echo "=== Switching to Redis queue ==="
                 
-                # Update env file
-                sed -i 's/QUEUE_TYPE=postgres/QUEUE_TYPE=redis/' $(envFile)
+                # Update env file - set QUEUE_TYPE to redis and add REDIS_URL
+                if grep -q "QUEUE_TYPE" .env.devprod; then
+                  sed -i 's/QUEUE_TYPE=.*/QUEUE_TYPE=redis/' .env.devprod
+                else
+                  echo "QUEUE_TYPE=redis" >> .env.devprod
+                fi
                 
-                # Start Redis if not running
-                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis up -d redis-dev || true
+                # Add REDIS_URL if not present (code uses REDIS_URL, not REDIS_HOST)
+                if ! grep -q "REDIS_URL" .env.devprod; then
+                  echo "REDIS_URL=redis://gdpr-redis:6379" >> .env.devprod
+                fi
                 
-                # Restart API container
-                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis restart api-dev || \
-                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis up -d api-dev
+                echo "Current env:"
+                grep -E "QUEUE_TYPE|REDIS" .env.devprod || true
+                
+                # Make sure Redis container is running
+                if ! docker ps | grep -q gdpr-redis; then
+                  echo "Starting Redis container..."
+                  docker run -d \
+                    --name gdpr-redis \
+                    --network gdpr-backend_default \
+                    -p 127.0.0.1:6379:6379 \
+                    --health-cmd="redis-cli ping" \
+                    --health-interval=5s \
+                    redis:7-alpine
+                  sleep 5
+                fi
+                
+                # Stop and remove container to pick up new env
+                docker stop gdpr-api-dev 2>/dev/null || true
+                docker rm gdpr-api-dev 2>/dev/null || true
+                
+                # Recreate container with new env
+                docker run -d \
+                  --name gdpr-api-dev \
+                  --network gdpr-backend_default \
+                  -p 127.0.0.1:3001:3000 \
+                  --env-file .env.devprod \
+                  -e DATABASE_URL="postgresql://gdpr_dev:gdpr_dev@gdpr-postgres:5432/gdpr_audit?schema=dev" \
+                  gdpr-backend_api-dev \
+                  sh -c "npx prisma migrate deploy && npm run start:prod"
                 
                 # Wait for healthy
-                for i in {1..30}; do
+                echo "Waiting for API to be healthy..."
+                for i in {1..60}; do
                   if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
-                    echo "API is healthy"
+                    echo "API is healthy after $i seconds"
                     break
                   fi
-                  echo "Waiting... ($i/30)"
-                  sleep 2
+                  if [ "$i" -eq 60 ]; then
+                    echo "ERROR: API did not become healthy"
+                    docker logs gdpr-api-dev --tail 50
+                    exit 1
+                  fi
+                  sleep 1
                 done
                 
-                # Verify queue type
+                # Verify queue type (should show redis)
                 echo "Queue stats:"
                 curl -s http://localhost:3001/api/health/queue/stats | jq .
               SWITCH_SCRIPT
@@ -319,24 +377,36 @@ stages:
                 echo "=== Restoring PostgreSQL queue (default) ==="
                 
                 # Update env file back to postgres
-                sed -i 's/QUEUE_TYPE=redis/QUEUE_TYPE=postgres/' $(envFile)
+                sed -i 's/QUEUE_TYPE=.*/QUEUE_TYPE=postgres/' .env.devprod
                 
-                # Stop Redis
-                docker-compose --env-file $(envFile) -f $(composeFile) --profile redis stop redis-dev || true
+                echo "Current env:"
+                grep -E "QUEUE_TYPE|REDIS" .env.devprod || true
                 
-                # Restart API
-                docker-compose --env-file $(envFile) -f $(composeFile) restart api-dev || \
-                docker-compose --env-file $(envFile) -f $(composeFile) up -d api-dev
+                # Stop and remove container to pick up new env
+                docker stop gdpr-api-dev 2>/dev/null || true
+                docker rm gdpr-api-dev 2>/dev/null || true
                 
-                # Wait and verify
-                for i in {1..30}; do
+                # Recreate container with postgres queue
+                docker run -d \
+                  --name gdpr-api-dev \
+                  --network gdpr-backend_default \
+                  -p 127.0.0.1:3001:3000 \
+                  --env-file .env.devprod \
+                  -e DATABASE_URL="postgresql://gdpr_dev:gdpr_dev@gdpr-postgres:5432/gdpr_audit?schema=dev" \
+                  gdpr-backend_api-dev \
+                  sh -c "npx prisma migrate deploy && npm run start:prod"
+                
+                # Wait for healthy
+                echo "Waiting for API to be healthy..."
+                for i in {1..60}; do
                   if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
-                    echo "API restored"
+                    echo "API restored after $i seconds"
                     break
                   fi
-                  sleep 2
+                  sleep 1
                 done
                 
+                echo "Final queue stats:"
                 curl -s http://localhost:3001/api/health/queue/stats | jq .
               RESTORE_SCRIPT
             displayName: 'Restore PostgreSQL'
