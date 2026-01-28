@@ -7,6 +7,7 @@ This document describes the load testing infrastructure for the GDPR Audit API, 
 - [Overview](#overview)
 - [Test Types](#test-types)
 - [Test Scripts](#test-scripts)
+- [Grafana Cloud k6](#grafana-cloud-k6)
 - [Azure DevOps Pipelines](#azure-devops-pipelines)
 - [Running Tests Locally](#running-tests-locally)
 - [Running Tests on Server](#running-tests-on-server)
@@ -69,16 +70,18 @@ The load testing suite uses [k6](https://k6.io/) to validate system performance 
 
 | Parameter | Value |
 |-----------|-------|
-| Virtual Users | 10 → 200 → 10 → 300 |
+| Virtual Users | 10 → 80 → 10 → 100 |
 | Duration | ~9 minutes |
 | Use Case | Marketing campaigns, viral content |
 
 **Pattern**:
 1. Normal load (10 VUs)
-2. Sudden spike to 200 VUs (3 min)
+2. Sudden spike to 80 VUs (3 min)
 3. Recovery period (10 VUs)
-4. Second spike to 300 VUs (3 min)
+4. Second spike to 100 VUs (3 min)
 5. Ramp down
+
+> **Note**: VUs limited to 100 for Grafana Cloud free tier. Set `MAX_VUS` env variable to override.
 
 ### 5. Soak/Endurance Test
 **Purpose**: Detect memory leaks and performance degradation over time.
@@ -89,20 +92,111 @@ The load testing suite uses [k6](https://k6.io/) to validate system performance 
 | Duration | 1-4 hours |
 | Use Case | Memory leak detection, stability validation |
 
+**Key Metrics**:
+- Response time trend over time
+- Memory usage (via `docker stats`)
+- Comparison of initial vs final response times
+
+### 6. Breakpoint Test
+**Purpose**: Find the maximum stable capacity by gradually increasing load until errors appear.
+
+| Parameter | Value |
+|-----------|-------|
+| Request Rate | 5 → 10 → 20 → 30 → 50 → 75 → 100 req/s |
+| Duration | ~8 minutes |
+| Use Case | Capacity planning, SLA definition |
+
+**How it works**:
+1. Starts at 5 requests/second
+2. Increases load every minute
+3. Monitors error rate at each level
+4. Identifies the point where errors start appearing
+
+**Output**: The request rate at which errors exceed 10% is your system's breaking point.
+
 ---
 
 ## Test Scripts
 
 All test scripts are located in `tests/load/`:
 
-| Script | Description | Duration | Max VUs |
-|--------|-------------|----------|---------|
-| `smoke.js` | Quick health verification | 30s | 5 |
-| `scan-queue.js` | Full load + stress test | ~33 min | 500 |
-| `spike.js` | Traffic burst simulation | ~9 min | 300 |
-| `soak.js` | Long-running endurance test | 1-4h | 30 |
-| `queue-stats.js` | Queue endpoint testing | 1 min | 10 |
-| `config.js` | Shared configuration | - | - |
+| Script | Description | Duration | Max VUs/RPS |
+|--------|-------------|----------|-------------|
+| `smoke.js` | Quick health check - verifies basic API functionality | 30s | 5 VUs |
+| `scan-queue.js` | Full load + stress test - simulates production traffic | ~33 min | 500 VUs |
+| `spike.js` | Traffic burst simulation - tests sudden load increases | ~9 min | 100 VUs |
+| `soak.js` | Endurance test - detects memory leaks over time | 1-4h | 30 VUs |
+| `breakpoint.js` | Capacity test - finds maximum stable throughput | ~8 min | 100 req/s |
+| `queue-stats.js` | Queue monitoring - tests `/health/queue/stats` endpoint | 1 min | 10 VUs |
+| `config.js` | Shared configuration - environment URLs and settings | - | - |
+
+---
+
+## Grafana Cloud k6
+
+Test results can be sent to Grafana Cloud for visualization, historical comparison, and team collaboration.
+
+### Dashboard URL
+
+**Grafana Cloud k6 Dashboard**: [https://grafana.com/products/cloud/k6/](https://grafana.com/products/cloud/k6/)
+
+After running tests with `--out cloud`, view results at:
+```
+https://<your-org>.grafana.net/a/k6-app/runs
+```
+
+### Setup
+
+1. **Create account**: Sign up at [grafana.com](https://grafana.com/)
+2. **Get API token**: Go to Grafana Cloud → k6 → Settings → API tokens
+3. **Login on server**:
+   ```bash
+   k6 login cloud --token YOUR_API_TOKEN
+   ```
+
+### Running Tests with Cloud Output
+
+```bash
+# Smoke test with cloud output
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/smoke.js
+
+# Spike test with cloud output
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/spike.js
+
+# Breakpoint test with cloud output
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/breakpoint.js
+```
+
+### Free Tier Limits
+
+| Limit | Value |
+|-------|-------|
+| Max Virtual Users | 100 VUs |
+| Test duration | Unlimited |
+| Data retention | 7 days |
+| Concurrent tests | 1 |
+
+> **Note**: Spike test is configured for max 100 VUs to stay within free tier limits.
+
+### Features
+
+- **Real-time monitoring**: Watch test execution live
+- **Historical comparison**: Compare runs over time
+- **Team sharing**: Share results with team members
+- **Threshold alerts**: Get notified when thresholds fail
+- **Export data**: Download results as CSV/JSON
+
+### Alternative: Local JSON Output
+
+If Grafana Cloud is not available, save results locally:
+
+```bash
+# Save to JSON file
+k6 run --out json=results/smoke-$(date +%Y%m%d-%H%M).json tests/load/smoke.js
+
+# Parse results with jq
+cat results/smoke-*.json | jq '.metrics.http_req_duration.values.avg'
+```
 
 ---
 
@@ -230,11 +324,20 @@ git pull origin main
 ### Run Tests
 
 ```bash
-# Spike test against local API
+# Smoke test (quick validation)
+k6 run --env BASE_URL=http://localhost:3001 tests/load/smoke.js
+
+# Spike test (traffic bursts)
 k6 run --env BASE_URL=http://localhost:3001 tests/load/spike.js
 
-# Spike test against public URL
-k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/spike.js
+# Breakpoint test (find max capacity)
+k6 run --env BASE_URL=http://localhost:3001 tests/load/breakpoint.js
+
+# Soak test (long-running, 1 hour)
+k6 run --env BASE_URL=http://localhost:3001 tests/load/soak.js
+
+# With Grafana Cloud output (recommended)
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/smoke.js
 ```
 
 ### Monitor During Tests
@@ -506,6 +609,11 @@ ls -la tests/load/
 
 | Date | Change |
 |------|--------|
+| 2026-01-28 | Added Grafana Cloud k6 integration section |
+| 2026-01-28 | Added breakpoint.js test documentation |
+| 2026-01-28 | Updated spike test VUs to 100 (Grafana Cloud free tier limit) |
+| 2026-01-28 | Enhanced test script descriptions |
+| 2026-01-27 | Added breakpoint test results and capacity recommendations |
 | 2026-01-24 | Added spike.js and soak.js tests |
 | 2026-01-24 | Fixed queue switching scripts (REDIS_URL, container recreation) |
 | 2026-01-24 | Fixed dev URL (api.dev vs dev.api) |
