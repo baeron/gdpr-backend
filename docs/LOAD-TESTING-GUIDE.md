@@ -472,18 +472,39 @@ docker stop gdpr-api-dev && docker rm gdpr-api-dev
 docker run -d ... (same as above)
 ```
 
-### Key Findings: PostgreSQL vs Redis
+### Key Findings: PostgreSQL vs Redis/BullMQ
 
-From initial testing:
+**Test Date**: 2026-01-28  
+**Environment**: Dev (api.dev.policytracker.eu)  
 
-| Metric | PostgreSQL | Redis |
-|--------|------------|-------|
-| Avg Response Time | ~10.5s | ~10.2s |
-| p95 Response Time | ~11s | ~10.8s |
-| Error Rate | 0% | 0% |
-| Throughput | Similar | Similar |
+#### Breakpoint Test Comparison
 
-**Conclusion**: For the current workload, both queues perform similarly. PostgreSQL queue is simpler (no additional infrastructure) while Redis offers better scalability for higher loads.
+| Metric | PostgreSQL | Redis/BullMQ | Improvement |
+|--------|------------|--------------|-------------|
+| Error Rate | 1.21% | **0.00%** | ♾️ better |
+| p95 Response | 8.08s | **136ms** | **60x faster** |
+| Median Response | 11ms | **8ms** | 1.4x faster |
+| Throughput | 29 req/s | **36 req/s** | 1.25x higher |
+| Max VUs needed | ~100 | **25** | 4x more efficient |
+
+#### Soak Test Comparison (1 hour, 30 VUs)
+
+| Metric | PostgreSQL | Redis/BullMQ | Improvement |
+|--------|------------|--------------|-------------|
+| Error Rate | 5.38% ❌ | **0.00%** ✅ | ♾️ better |
+| HTTP Failed | 5.37% ❌ | **0.00%** ✅ | ♾️ better |
+| p95 Response | 237ms | **58ms** | **4x faster** |
+| Success Rate | 94.62% | **100%** | Perfect |
+| Failed Jobs | 24,555 | **2** | **12,000x fewer** |
+| Throughput | 33 req/s | **35 req/s** | 1.06x higher |
+
+**Conclusion**: **Redis/BullMQ is significantly better** for production:
+- Zero errors under sustained load
+- 4-60x faster response times
+- Near-zero failed jobs (2 vs 24,555)
+- More efficient VU usage
+
+**Recommendation**: Use Redis/BullMQ for production deployments.
 
 ---
 
@@ -527,11 +548,37 @@ From initial testing:
 #### Recommendations
 
 1. **Use async endpoint** (`/api/scanner/queue`) for all production traffic
-2. **Safe capacity**: Up to 30 concurrent requests/second
-3. **Scaling options**:
-   - Increase `MAX_CONCURRENT_SCANS` from 1 to 2-3
+2. **Use Redis/BullMQ** for queue management (significantly better performance)
+3. **Safe capacity**: Up to 36 concurrent requests/second with Redis
+4. **Scaling options**:
+   - Increase `MAX_CONCURRENT_SCANS` from 1 to 3 (adds ~300-600MB RAM per instance)
    - Add horizontal scaling (multiple API instances)
-   - Switch to Redis queue for higher throughput
+
+### Redis/BullMQ Test Results (2026-01-28)
+
+#### Breakpoint Test
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Error Rate | 0.00% | ✅ Perfect |
+| p95 Response | 136ms | ✅ Excellent |
+| Avg Response | 25ms | ✅ Excellent |
+| Median Response | 8ms | ✅ Excellent |
+| Throughput | 36 req/s | ✅ Excellent |
+| Success Rate | 100% | ✅ Perfect |
+
+#### Soak Test (1 hour)
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Error Rate | 0.00% | ✅ Perfect |
+| HTTP Failed | 0.00% | ✅ Perfect |
+| p95 Response | 58ms | ✅ Excellent |
+| Health Check p99 | 16ms | ✅ Excellent |
+| Success Rate | 100% | ✅ Perfect |
+| Failed Jobs | 2 out of 42,365 | ✅ 0.005% |
+
+**Key Takeaway**: Redis/BullMQ maintained perfect stability for 1 hour with zero errors and consistent response times.
 
 ---
 
@@ -710,6 +757,8 @@ ls -la tests/load/
 
 | Date | Change |
 |------|--------|
+| 2026-01-28 | Added Redis/BullMQ test results (breakpoint + soak) |
+| 2026-01-28 | Updated PostgreSQL vs Redis comparison with real data |
 | 2026-01-28 | Added queue management troubleshooting (clear queue, increase concurrency) |
 | 2026-01-28 | Added Grafana Cloud k6 integration section |
 | 2026-01-28 | Added breakpoint.js test documentation |
