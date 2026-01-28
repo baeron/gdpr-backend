@@ -9,6 +9,11 @@ const spikeRequests = new Counter('spike_requests');
 const spikeErrors = new Rate('spike_errors');
 const responseTime = new Trend('response_time');
 
+// Max VUs for Grafana Cloud free tier (100 VUs limit)
+const MAX_VUS = __ENV.MAX_VUS ? parseInt(__ENV.MAX_VUS) : 100;
+const SPIKE_1 = Math.min(80, MAX_VUS);   // First spike
+const SPIKE_2 = Math.min(100, MAX_VUS);  // Second spike (max)
+
 export const options = {
   scenarios: {
     // Sudden spike pattern
@@ -16,15 +21,15 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '10s', target: 10 },    // Warm up
-        { duration: '1m', target: 10 },     // Normal load
-        { duration: '10s', target: 200 },   // SPIKE! Sudden jump to 200 users
-        { duration: '3m', target: 200 },    // Stay at spike
-        { duration: '10s', target: 10 },    // Drop back
-        { duration: '1m', target: 10 },     // Recovery period
-        { duration: '10s', target: 300 },   // Second SPIKE! Even higher
-        { duration: '3m', target: 300 },    // Stay at higher spike
-        { duration: '10s', target: 0 },     // Ramp down
+        { duration: '10s', target: 10 },       // Warm up
+        { duration: '1m', target: 10 },        // Normal load
+        { duration: '10s', target: SPIKE_1 },  // SPIKE! Sudden jump to 80 users
+        { duration: '3m', target: SPIKE_1 },   // Stay at spike
+        { duration: '10s', target: 10 },       // Drop back
+        { duration: '1m', target: 10 },        // Recovery period
+        { duration: '10s', target: SPIKE_2 },  // Second SPIKE! To max (100)
+        { duration: '3m', target: SPIKE_2 },   // Stay at higher spike
+        { duration: '10s', target: 0 },        // Ramp down
       ],
     },
   },
@@ -104,8 +109,9 @@ export default function () {
 export function setup() {
   console.log('=== Spike Test ===');
   console.log(`Target: ${BASE_URL}`);
-  console.log('Pattern: Normal → 200 VUs spike → Recovery → 300 VUs spike → End');
+  console.log(`Pattern: Normal → ${SPIKE_1} VUs spike → Recovery → ${SPIKE_2} VUs spike → End`);
   console.log('Duration: ~9 minutes');
+  console.log(`Max VUs: ${MAX_VUS} (set MAX_VUS env to override)`);
   console.log('');
   
   // Verify target is healthy
