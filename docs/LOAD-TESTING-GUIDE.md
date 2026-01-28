@@ -640,6 +640,50 @@ docker run -d ... --env-file .env.devprod ...
 3. Reduce VU count
 4. Check for rate limiting
 
+### Queue Overflow / Too Many Queued Jobs
+
+After load testing, the queue may have thousands of pending jobs. Clear before next test:
+
+```bash
+# Check current queue status
+curl -s http://localhost:3001/api/health/queue/stats | jq
+
+# Clear the queue (dev schema)
+docker exec gdpr-postgres psql -U gdpr -d gdpr_audit -c \
+  'SET search_path TO dev; TRUNCATE "ScanJob" CASCADE;'
+
+# Verify queue is empty
+curl -s http://localhost:3001/api/health/queue/stats | jq
+```
+
+> **Note**: The database uses schema `dev` for the development environment. Always specify `SET search_path TO dev;` before TRUNCATE.
+
+### Queue Stats Not Updating After TRUNCATE
+
+The stats may be cached in memory. Restart the API container:
+
+```bash
+docker restart gdpr-api-dev
+sleep 15
+curl -s http://localhost:3001/api/health/queue/stats | jq
+```
+
+### Increase Queue Processing Speed
+
+If queue is processing too slowly (`maxConcurrent: 1`):
+
+```bash
+# Check current setting
+grep MAX_CONCURRENT .env.devprod
+
+# Increase concurrent scans (add or update)
+echo "MAX_CONCURRENT_SCANS=3" >> .env.devprod
+
+# Recreate container to apply
+docker stop gdpr-api-dev && docker rm gdpr-api-dev
+docker run -d --name gdpr-api-dev ... --env-file .env.devprod ...
+```
+
 ### Test File Not Found on Server
 
 ```bash
@@ -666,6 +710,7 @@ ls -la tests/load/
 
 | Date | Change |
 |------|--------|
+| 2026-01-28 | Added queue management troubleshooting (clear queue, increase concurrency) |
 | 2026-01-28 | Added Grafana Cloud k6 integration section |
 | 2026-01-28 | Added breakpoint.js test documentation |
 | 2026-01-28 | Updated spike test VUs to 100 (Grafana Cloud free tier limit) |
