@@ -281,24 +281,37 @@ sudo apt-get update && sudo apt-get install -y k6
 
 ### Running Tests
 
+#### Console Output (Default)
+
 ```bash
-# Smoke test (local)
+# Against local dev server (localhost:3000)
 k6 run tests/load/smoke.js
 
-# Smoke test (dev)
+# Against dev environment
 k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/smoke.js
-
-# Spike test (dev)
 k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/spike.js
+k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/breakpoint.js
 
-# Soak test (1 hour)
-k6 run --env BASE_URL=https://api.dev.policytracker.eu tests/load/soak.js
-
-# Soak test (4 hours, 50 users)
+# Soak test with custom duration and VUs
 k6 run --env BASE_URL=https://api.dev.policytracker.eu \
   --env DURATION=4h --env VUS=50 tests/load/soak.js
+```
 
-# Save results to JSON
+#### Grafana Cloud Output
+
+```bash
+# Login first (one time)
+k6 login cloud --token YOUR_API_TOKEN
+
+# Run with cloud output
+k6 run --out cloud --env BASE_URL=https://api.dev.policytracker.eu tests/load/smoke.js
+k6 run --out cloud --env BASE_URL=https://api.dev.policytracker.eu tests/load/spike.js
+```
+
+#### JSON File Output
+
+```bash
+# Save results for offline analysis
 k6 run --env BASE_URL=https://api.dev.policytracker.eu \
   --out json=results/spike-$(date +%Y%m%d-%H%M).json \
   tests/load/spike.js
@@ -323,6 +336,10 @@ git pull origin main
 
 ### Run Tests
 
+#### Option 1: Console Output Only (Quick Testing)
+
+Results displayed in terminal only. Good for quick validation and debugging.
+
 ```bash
 # Smoke test (quick validation)
 k6 run --env BASE_URL=http://localhost:3001 tests/load/smoke.js
@@ -336,8 +353,48 @@ k6 run --env BASE_URL=http://localhost:3001 tests/load/breakpoint.js
 # Soak test (long-running, 1 hour)
 k6 run --env BASE_URL=http://localhost:3001 tests/load/soak.js
 
-# With Grafana Cloud output (recommended)
+# Full load + stress test
+k6 run --env BASE_URL=http://localhost:3001 tests/load/scan-queue.js
+```
+
+#### Option 2: Grafana Cloud Output (Recommended for Analysis)
+
+Results sent to Grafana Cloud for visualization, historical comparison, and team sharing.
+
+> **Prerequisite**: Run `k6 login cloud --token YOUR_API_TOKEN` first.
+
+```bash
+# Smoke test with cloud output
 k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/smoke.js
+
+# Spike test with cloud output
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/spike.js
+
+# Breakpoint test with cloud output
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/breakpoint.js
+
+# Soak test with cloud output (1 hour)
+k6 run --out cloud --env BASE_URL=http://localhost:3001 tests/load/soak.js
+```
+
+#### Option 3: Local JSON File (Offline Analysis)
+
+Results saved to JSON file for later analysis with `jq` or other tools.
+
+```bash
+# Create results directory
+mkdir -p results
+
+# Smoke test with JSON output
+k6 run --out json=results/smoke-$(date +%Y%m%d-%H%M).json \
+  --env BASE_URL=http://localhost:3001 tests/load/smoke.js
+
+# Spike test with JSON output
+k6 run --out json=results/spike-$(date +%Y%m%d-%H%M).json \
+  --env BASE_URL=http://localhost:3001 tests/load/spike.js
+
+# Parse JSON results
+cat results/smoke-*.json | jq -s '.[0].metrics.http_req_duration.values'
 ```
 
 ### Monitor During Tests
