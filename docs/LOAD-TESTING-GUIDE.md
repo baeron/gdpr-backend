@@ -611,6 +611,12 @@ Before production launch, complete these tests:
 - [ ] Run limited spike test on prod (50 VUs max)
 - [ ] Monitor APM/logs for anomalies
 
+### Phase 6: Performance Optimization (Future)
+- [ ] Increase `WORKER_CONCURRENCY` from 1 to 3 (requires ~300-600MB additional RAM)
+- [ ] Monitor RAM usage after increasing workers
+- [ ] Re-run soak test to verify stability with multiple workers
+- [ ] Consider horizontal scaling if single instance is insufficient
+
 ---
 
 ## Interpreting Results

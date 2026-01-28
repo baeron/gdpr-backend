@@ -7,22 +7,24 @@ import { Rate, Trend } from 'k6/metrics';
 const errorRate = new Rate('errors');
 const responseTime = new Trend('response_time');
 
+// Max VUs for Grafana Cloud free tier (100 VUs limit)
+const MAX_VUS = __ENV.MAX_VUS ? parseInt(__ENV.MAX_VUS) : 50;
+
 export const options = {
   scenarios: {
     breakpoint: {
       executor: 'ramping-arrival-rate',
       startRate: 1,
       timeUnit: '1s',
-      preAllocatedVUs: 100,
-      maxVUs: 200,
+      preAllocatedVUs: Math.min(25, MAX_VUS),
+      maxVUs: MAX_VUS,
       stages: [
         { duration: '1m', target: 5 },    // 5 req/s
         { duration: '1m', target: 10 },   // 10 req/s
         { duration: '1m', target: 20 },   // 20 req/s
         { duration: '1m', target: 30 },   // 30 req/s
-        { duration: '1m', target: 50 },   // 50 req/s
-        { duration: '1m', target: 75 },   // 75 req/s
-        { duration: '1m', target: 100 },  // 100 req/s
+        { duration: '1m', target: 40 },   // 40 req/s
+        { duration: '1m', target: 50 },   // 50 req/s (max)
         { duration: '1m', target: 0 },    // Ramp down
       ],
     },
@@ -74,15 +76,15 @@ export default function () {
 export function setup() {
   console.log('=== Breakpoint Test ===');
   console.log(`Target: ${BASE_URL}`);
+  console.log(`Max VUs: ${MAX_VUS} (set MAX_VUS env to override)`);
   console.log('');
   console.log('Load stages:');
   console.log('  1m: 5 req/s');
   console.log('  2m: 10 req/s');
   console.log('  3m: 20 req/s');
   console.log('  4m: 30 req/s');
-  console.log('  5m: 50 req/s');
-  console.log('  6m: 75 req/s');
-  console.log('  7m: 100 req/s');
+  console.log('  5m: 40 req/s');
+  console.log('  6m: 50 req/s');
   console.log('');
   console.log('Watch for: when error rate starts climbing');
   console.log('');
