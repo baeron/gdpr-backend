@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page } from 'playwright';
-import { PrivacyPolicyInfo } from '../dto/scan-result.dto';
+import { PrivacyPolicyInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 const PRIVACY_LINK_PATTERNS = [
   /privacy/i,
@@ -132,6 +133,7 @@ const CONTENT_PATTERNS = {
   ],
 };
 
+@Injectable()
 export class PrivacyPolicyAnalyzer {
   async analyzePrivacyPolicy(page: Page): Promise<PrivacyPolicyInfo> {
     const defaultContent = {
@@ -308,5 +310,59 @@ export class PrivacyPolicyAnalyzer {
     }
 
     return content;
+  }
+
+  static generateIssues(privacyPolicy: PrivacyPolicyInfo): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+
+    if (!privacyPolicy.found) {
+      issues.push({
+        code: 'NO_PRIVACY_POLICY',
+        title: 'No privacy policy link found',
+        description: 'No link to a privacy policy was detected on the website.',
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Add a clearly visible link to your privacy policy in the footer and consent banner.',
+      });
+    }
+
+    if (privacyPolicy.found && privacyPolicy.content.analyzed) {
+      if (privacyPolicy.content.missingElements.length > 0) {
+        issues.push({
+          code: 'PRIVACY_POLICY_INCOMPLETE',
+          title: 'Privacy policy missing required information',
+          description: `The privacy policy is missing: ${privacyPolicy.content.missingElements.join(', ')}.`,
+          riskLevel: RiskLevel.HIGH,
+          recommendation:
+            'Update your privacy policy to include all required GDPR Art. 13-14 elements.',
+        });
+      }
+
+      if (!privacyPolicy.content.hasDataRetention) {
+        issues.push({
+          code: 'NO_DATA_RETENTION_INFO',
+          title: 'No data retention period specified',
+          description:
+            'The privacy policy does not specify how long personal data is retained.',
+          riskLevel: RiskLevel.MEDIUM,
+          recommendation:
+            'Add clear information about data retention periods for each type of data processing.',
+        });
+      }
+
+      if (!privacyPolicy.content.hasRightToComplain) {
+        issues.push({
+          code: 'NO_COMPLAINT_RIGHT_INFO',
+          title: 'No information about right to complain',
+          description:
+            'The privacy policy does not mention the right to lodge a complaint with a supervisory authority.',
+          riskLevel: RiskLevel.MEDIUM,
+          recommendation:
+            'Add information about the right to complain to the relevant data protection authority.',
+        });
+      }
+    }
+
+    return issues;
   }
 }

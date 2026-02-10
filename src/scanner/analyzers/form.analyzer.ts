@@ -1,4 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page } from 'playwright';
+import { RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 import { SitemapAnalyzer } from './sitemap.analyzer';
 
 export interface FormInfo {
@@ -83,6 +85,7 @@ const PRIVACY_LINK_PATTERNS = [
   /data.*protection/i,
 ];
 
+@Injectable()
 export class FormAnalyzer {
   private readonly sitemapAnalyzer = new SitemapAnalyzer();
 
@@ -589,5 +592,46 @@ export class FormAnalyzer {
     }
 
     return formPageUrls;
+  }
+
+  static generateIssues(forms: Pick<FormsAnalysisResult, 'formsWithoutConsent' | 'formsWithPreCheckedMarketing' | 'dataCollectionForms' | 'formsWithPrivacyLink'>): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+
+    if (forms.formsWithoutConsent > 0) {
+      issues.push({
+        code: 'FORMS_WITHOUT_CONSENT',
+        title: 'Data collection forms without consent checkbox',
+        description: `${forms.formsWithoutConsent} form(s) collect personal data without a consent checkbox.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Add a consent checkbox to all forms that collect personal data (email, name, phone).',
+      });
+    }
+
+    if (forms.formsWithPreCheckedMarketing > 0) {
+      issues.push({
+        code: 'FORMS_PRECHECKED_MARKETING',
+        title: 'Marketing consent pre-checked in forms',
+        description: `${forms.formsWithPreCheckedMarketing} form(s) have marketing/newsletter consent pre-checked.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Marketing consent checkboxes must be unchecked by default. Users must actively opt-in.',
+      });
+    }
+
+    const dataFormsWithoutPrivacy =
+      forms.dataCollectionForms - forms.formsWithPrivacyLink;
+    if (dataFormsWithoutPrivacy > 0 && forms.dataCollectionForms > 0) {
+      issues.push({
+        code: 'FORMS_NO_PRIVACY_LINK',
+        title: 'Forms missing privacy policy link',
+        description: `${dataFormsWithoutPrivacy} data collection form(s) do not link to the privacy policy.`,
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Add a link to your privacy policy near all forms that collect personal data.',
+      });
+    }
+
+    return issues;
   }
 }

@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { Test, TestingModule } from '@nestjs/testing';
 import { HealthService } from './health.service';
 import { PrismaService } from '../prisma/prisma.service';

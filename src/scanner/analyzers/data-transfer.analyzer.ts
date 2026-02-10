@@ -1,4 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Request } from 'playwright';
+import { RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 export interface DataTransferInfo {
   usServicesDetected: USServiceInfo[];
@@ -284,6 +286,7 @@ const ADEQUATE_COUNTRIES = [
   'uruguay',
 ];
 
+@Injectable()
 export class DataTransferAnalyzer {
   private detectedServices: Map<string, USServiceInfo> = new Map();
 
@@ -338,5 +341,33 @@ export class DataTransferAnalyzer {
       (c) =>
         country.toLowerCase().includes(c) || c.includes(country.toLowerCase()),
     );
+  }
+
+  static generateIssues(dataTransfers: Pick<DataTransferInfo, 'highRiskTransfers' | 'totalUSServices'>): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+
+    if (dataTransfers.highRiskTransfers.length > 0) {
+      issues.push({
+        code: 'US_DATA_TRANSFERS',
+        title: 'Data transfers to US-based services',
+        description: `${dataTransfers.highRiskTransfers.length} US-based analytics/advertising service(s) detected: ${dataTransfers.highRiskTransfers.slice(0, 5).join(', ')}${dataTransfers.highRiskTransfers.length > 5 ? '...' : ''}.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'After Schrems II, transfers to US require additional safeguards (SCCs, supplementary measures). Consider EU-based alternatives or ensure proper legal basis.',
+      });
+    }
+
+    if (dataTransfers.totalUSServices > 10) {
+      issues.push({
+        code: 'EXCESSIVE_US_SERVICES',
+        title: 'Excessive number of US-based services',
+        description: `${dataTransfers.totalUSServices} US-based services detected. This increases data transfer compliance complexity.`,
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Review and minimize the number of US-based third-party services. Consider EU-based alternatives where possible.',
+      });
+    }
+
+    return issues;
   }
 }

@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page, Request } from 'playwright';
-import { CookieInfo } from '../dto/scan-result.dto';
+import { CookieInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 export interface SecurityInfo {
   https: {
@@ -28,6 +29,7 @@ export interface CookieSecurityIssue {
 
 const THIRTEEN_MONTHS_MS = 13 * 30 * 24 * 60 * 60 * 1000; // ~13 months in milliseconds
 
+@Injectable()
 export class SecurityAnalyzer {
   private mixedContentResources: string[] = [];
 
@@ -183,5 +185,67 @@ export class SecurityAnalyzer {
       /account/i,
     ];
     return sensitivePatterns.some((pattern) => pattern.test(name));
+  }
+
+  static generateIssues(security: SecurityInfo): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+
+    if (!security.https.enabled) {
+      issues.push({
+        code: 'NO_HTTPS',
+        title: 'Website not using HTTPS',
+        description:
+          'The website is not served over a secure HTTPS connection.',
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Enable HTTPS with a valid SSL/TLS certificate to encrypt data in transit.',
+      });
+    }
+
+    if (security.mixedContent.found) {
+      issues.push({
+        code: 'MIXED_CONTENT',
+        title: 'Mixed content detected',
+        description: `${security.mixedContent.resources.length} resource(s) are loaded over insecure HTTP on an HTTPS page.`,
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Ensure all resources (scripts, images, stylesheets) are loaded over HTTPS.',
+      });
+    }
+
+    if (security.cookieSecurity.excessiveExpiration > 0) {
+      issues.push({
+        code: 'COOKIE_EXCESSIVE_EXPIRATION',
+        title: 'Cookies with excessive lifetime',
+        description: `${security.cookieSecurity.excessiveExpiration} cookie(s) have a lifetime exceeding 13 months (CNIL guideline).`,
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Reduce cookie lifetime to maximum 13 months as recommended by CNIL.',
+      });
+    }
+
+    if (security.cookieSecurity.withoutSecure > 0 && security.https.enabled) {
+      issues.push({
+        code: 'COOKIES_WITHOUT_SECURE',
+        title: 'Cookies missing Secure flag',
+        description: `${security.cookieSecurity.withoutSecure} cookie(s) are missing the Secure flag on an HTTPS site.`,
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Add the Secure flag to all cookies to ensure they are only sent over HTTPS.',
+      });
+    }
+
+    if (security.cookieSecurity.withoutSameSite > 3) {
+      issues.push({
+        code: 'COOKIES_WITHOUT_SAMESITE',
+        title: 'Cookies missing SameSite attribute',
+        description: `${security.cookieSecurity.withoutSameSite} cookie(s) are missing the SameSite attribute.`,
+        riskLevel: RiskLevel.LOW,
+        recommendation:
+          'Add SameSite=Lax or SameSite=Strict to cookies for CSRF protection.',
+      });
+    }
+
+    return issues;
   }
 }

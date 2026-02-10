@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page, Request } from 'playwright';
-import { TrackerInfo } from '../dto/scan-result.dto';
+import { TrackerInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 interface TrackerPattern {
   name: string;
@@ -95,6 +96,7 @@ const TRACKER_PATTERNS: TrackerPattern[] = [
   },
 ];
 
+@Injectable()
 export class TrackerAnalyzer {
   private detectedTrackers: Map<string, TrackerInfo> = new Map();
 
@@ -133,5 +135,23 @@ export class TrackerAnalyzer {
 
   reset(): void {
     this.detectedTrackers.clear();
+  }
+
+  static generateIssues(
+    trackers: { loadedBeforeConsent: boolean; name: string; type: string }[],
+  ): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+    const trackersBeforeConsent = trackers.filter((t) => t.loadedBeforeConsent);
+    if (trackersBeforeConsent.length > 0) {
+      issues.push({
+        code: 'TRACKERS_BEFORE_CONSENT',
+        title: 'Tracking scripts loaded before consent',
+        description: `${trackersBeforeConsent.length} tracking script(s) were loaded before user consent: ${trackersBeforeConsent.map((t) => t.name).join(', ')}.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Delay loading of all tracking scripts until user consent is obtained.',
+      });
+    }
+    return issues;
   }
 }

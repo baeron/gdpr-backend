@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page, Cookie } from 'playwright';
-import { CookieInfo } from '../dto/scan-result.dto';
+import { CookieInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 const KNOWN_COOKIES: Record<
   string,
@@ -26,6 +27,7 @@ const KNOWN_COOKIES: Record<
   _csrf: { category: 'necessary', description: 'CSRF Protection' },
 };
 
+@Injectable()
 export class CookieAnalyzer {
   async analyzeCookies(
     page: Page,
@@ -104,5 +106,23 @@ export class CookieAnalyzer {
     }
 
     return 'unknown';
+  }
+
+  static generateIssues(cookies: CookieInfo[]): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+    const nonEssentialBeforeConsent = cookies.filter(
+      (c) => c.setBeforeConsent && c.category !== 'necessary',
+    );
+    if (nonEssentialBeforeConsent.length > 0) {
+      issues.push({
+        code: 'COOKIES_BEFORE_CONSENT',
+        title: 'Non-essential cookies set before consent',
+        description: `${nonEssentialBeforeConsent.length} non-essential cookie(s) were set before user consent was obtained.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Ensure all non-essential cookies are only set after obtaining explicit user consent.',
+      });
+    }
+    return issues;
   }
 }

@@ -2,6 +2,18 @@ import { Module, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { ScannerController } from './scanner.controller';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
+import { BrowserManagerService } from './browser-manager.service';
+import { IssueGeneratorService } from './issue-generator.service';
+import { ScoreCalculatorService } from './score-calculator.service';
+import { UrlUtilsService } from './url-utils.service';
+import { CookieAnalyzer } from './analyzers/cookie.analyzer';
+import { TrackerAnalyzer } from './analyzers/tracker.analyzer';
+import { ConsentAnalyzer } from './analyzers/consent.analyzer';
+import { PrivacyPolicyAnalyzer } from './analyzers/privacy-policy.analyzer';
+import { SecurityAnalyzer } from './analyzers/security.analyzer';
+import { FormAnalyzer } from './analyzers/form.analyzer';
+import { DataTransferAnalyzer } from './analyzers/data-transfer.analyzer';
+import { TechnologyAnalyzer } from './analyzers/technology.analyzer';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_SERVICE } from './queue/queue.interface';
@@ -32,7 +44,23 @@ const queueProvider = {
 @Module({
   imports: [PrismaModule],
   controllers: [ScannerController],
-  providers: [ScannerService, ScannerReportService, queueProvider],
+  providers: [
+    CookieAnalyzer,
+    TrackerAnalyzer,
+    ConsentAnalyzer,
+    PrivacyPolicyAnalyzer,
+    SecurityAnalyzer,
+    FormAnalyzer,
+    DataTransferAnalyzer,
+    TechnologyAnalyzer,
+    BrowserManagerService,
+    IssueGeneratorService,
+    ScoreCalculatorService,
+    UrlUtilsService,
+    ScannerService,
+    ScannerReportService,
+    queueProvider,
+  ],
   exports: [ScannerService, ScannerReportService, QUEUE_SERVICE],
 })
 export class ScannerModule implements OnModuleInit, OnModuleDestroy {

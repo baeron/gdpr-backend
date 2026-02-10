@@ -1,5 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { Page } from 'playwright';
-import { ConsentBannerInfo } from '../dto/scan-result.dto';
+import { ConsentBannerInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
 
 const CONSENT_SELECTORS = {
   // Common consent banner selectors
@@ -81,6 +82,7 @@ const CONSENT_SELECTORS = {
   ],
 };
 
+@Injectable()
 export class ConsentAnalyzer {
   async analyzeConsentBanner(page: Page): Promise<ConsentBannerInfo> {
     const defaultQuality = {
@@ -433,5 +435,85 @@ export class ConsentAnalyzer {
       }
     }
     return false;
+  }
+
+  static generateIssues(consentBanner: ConsentBannerInfo): ScanIssue[] {
+    const issues: ScanIssue[] = [];
+
+    if (!consentBanner.found) {
+      issues.push({
+        code: 'NO_CONSENT_BANNER',
+        title: 'No cookie consent banner detected',
+        description: 'No cookie consent mechanism was detected on the website.',
+        riskLevel: RiskLevel.CRITICAL,
+        recommendation:
+          'Implement a GDPR-compliant cookie consent banner that appears before any non-essential cookies are set.',
+      });
+    }
+
+    if (consentBanner.found && !consentBanner.hasRejectButton) {
+      issues.push({
+        code: 'NO_REJECT_OPTION',
+        title: 'No option to reject cookies',
+        description:
+          'The consent banner does not provide an easy way to reject non-essential cookies.',
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Add a clearly visible "Reject" or "Decline" button to the consent banner.',
+      });
+    }
+
+    if (consentBanner.found && consentBanner.quality.hasPreCheckedBoxes) {
+      issues.push({
+        code: 'PRE_CHECKED_BOXES',
+        title: 'Non-essential cookies pre-selected',
+        description: `Non-essential cookie categories are pre-checked: ${consentBanner.quality.preCheckedCategories.join(', ')}.`,
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'All non-essential cookie categories must be unchecked by default. Only "necessary" cookies can be pre-selected.',
+      });
+    }
+
+    if (consentBanner.found && !consentBanner.quality.hasEqualProminence) {
+      issues.push({
+        code: 'UNEQUAL_BUTTON_PROMINENCE',
+        title: 'Accept and Reject buttons have unequal prominence',
+        description:
+          'The "Accept" button is significantly more prominent than the "Reject" option, which may manipulate user choice.',
+        riskLevel: RiskLevel.HIGH,
+        recommendation:
+          'Make the "Reject" button equally visible and accessible as the "Accept" button (similar size, color, and position).',
+      });
+    }
+
+    if (consentBanner.found && consentBanner.quality.isCookieWall) {
+      issues.push({
+        code: 'COOKIE_WALL',
+        title: 'Cookie wall detected',
+        description:
+          'The website blocks access to content until cookies are accepted, with no option to reject or customize.',
+        riskLevel: RiskLevel.CRITICAL,
+        recommendation:
+          'Remove the cookie wall. Users must be able to access the website without accepting non-essential cookies.',
+      });
+    }
+
+    if (
+      consentBanner.found &&
+      !consentBanner.quality.hasGranularConsent &&
+      consentBanner.hasAcceptButton
+    ) {
+      issues.push({
+        code: 'NO_GRANULAR_CONSENT',
+        title: 'No granular cookie consent options',
+        description:
+          'The consent banner does not allow users to choose which cookie categories to accept.',
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation:
+          'Provide options to accept/reject different cookie categories (e.g., Analytics, Marketing, Functional).',
+      });
+    }
+
+    return issues;
   }
 }

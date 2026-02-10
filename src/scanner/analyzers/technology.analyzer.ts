@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { Page, Request } from 'playwright';
 
 export interface TechnologyInfo {
@@ -449,6 +450,7 @@ const TECH_SIGNATURES: Array<{
   },
 ];
 
+@Injectable()
 export class TechnologyAnalyzer {
   private detectedTechnologies: Map<string, TechnologyInfo> = new Map();
   private pageHtml: string = '';
