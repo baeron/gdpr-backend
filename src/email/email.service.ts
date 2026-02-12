@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 
@@ -16,6 +16,10 @@ import {
 
 // i18n
 import { isValidLocale, DEFAULT_LOCALE } from './i18n';
+
+// PDF
+import { PdfReportService } from './pdf-report.service';
+import { ScanResultDto } from '../scanner/dto/scan-result.dto';
 
 /**
  * Email types for tracking and analytics
@@ -45,6 +49,11 @@ interface EmailLog {
 /**
  * Base parameters for sending emails
  */
+interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+}
+
 interface SendEmailParams {
   to: string;
   subject: string;
@@ -52,6 +61,7 @@ interface SendEmailParams {
   templateType: EmailTemplateType;
   locale?: string;
   metadata?: Record<string, unknown>;
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -75,7 +85,10 @@ export class EmailService {
   private sentCount = 0;
   private failedCount = 0;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly pdfReportService?: PdfReportService,
+  ) {
     const apiKey = this.configService.get<string>('RESEND_API_KEY');
     this.resend = apiKey ? new Resend(apiKey) : null;
 
@@ -162,6 +175,12 @@ export class EmailService {
         to,
         subject,
         html,
+        ...(params.attachments?.length && {
+          attachments: params.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+          })),
+        }),
       });
 
       const durationMs = Date.now() - startTime;
@@ -267,13 +286,43 @@ export class EmailService {
    */
   async sendAuditResults(
     to: string,
-    params: Omit<AuditResultsParams, 'locale'> & { locale?: string },
+    params: Omit<AuditResultsParams, 'locale'> & {
+      locale?: string;
+      scanResult?: ScanResultDto;
+    },
   ): Promise<boolean> {
     const locale = this.normalizeLocale(params.locale);
     const { subject, html } = generateAuditResultsEmail({
       ...params,
       locale,
     });
+
+    // Generate free PDF report attachment if scan result is provided
+    let attachments: EmailAttachment[] | undefined;
+    if (params.scanResult && this.pdfReportService) {
+      try {
+        const upgradeUrl = `https://policytracker.eu/report/${params.reportId}?upgrade=true`;
+        const pdfBuffer = await this.pdfReportService.generateReport(
+          params.scanResult,
+          { mode: 'free', upgradeUrl, reportId: params.reportId },
+        );
+        attachments = [
+          {
+            filename: `gdpr-report-${params.reportId}.pdf`,
+            content: pdfBuffer,
+          },
+        ];
+        this.logger.log(
+          `PDF attachment generated for report ${params.reportId} (${(pdfBuffer.length / 1024).toFixed(1)} KB)`,
+        );
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.logger.error(
+          `Failed to generate PDF attachment for report ${params.reportId}: ${err.message}`,
+        );
+        // Continue sending email without attachment
+      }
+    }
 
     return this.sendEmail({
       to,
@@ -285,7 +334,9 @@ export class EmailService {
         auditId: params.auditId,
         reportId: params.reportId,
         score: params.score,
+        hasPdfAttachment: !!attachments,
       },
+      attachments,
     });
   }
 
