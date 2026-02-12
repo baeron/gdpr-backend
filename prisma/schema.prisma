@@ -222,3 +222,137 @@ enum PaymentStatus {
   EXPIRED
   REFUNDED
 }
+
+// ==================== ANALYTICS ====================
+
+// Analytics session — one per visitor session
+model AnalyticsSession {
+  id                String   @id @default(cuid())
+  sessionId         String   @unique  // UUID generated on client (sessionStorage)
+
+  // GeoIP (resolved server-side from IP)
+  ipHash            String?  // SHA-256 hash of IP + daily salt (GDPR)
+  country           String?  // ISO 3166-1 alpha-2 (e.g., "DE", "FR")
+  city              String?
+  region            String?
+  timezone          String?  // e.g., "Europe/Berlin"
+
+  // Device info (parsed from User-Agent)
+  browser           String?  // e.g., "Chrome"
+  browserVersion    String?  // e.g., "120.0"
+  os                String?  // e.g., "Windows"
+  osVersion         String?  // e.g., "11"
+  deviceType        DeviceType @default(DESKTOP)
+
+  // Traffic source
+  referrer          String?  // document.referrer
+  utmSource         String?  // utm_source
+  utmMedium         String?  // utm_medium
+  utmCampaign       String?  // utm_campaign
+  utmTerm           String?  // utm_term
+  utmContent        String?  // utm_content
+
+  // Landing context
+  landingPage       String?  // first page URL path
+  language          String?  // navigator.language (e.g., "de", "en-US")
+  screenResolution  String?  // e.g., "1920x1080"
+  viewportSize      String?  // e.g., "1440x900"
+
+  // Timing
+  lastActivityAt    DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  // Relations
+  events            AnalyticsEvent[]
+
+  @@index([sessionId])
+  @@index([country])
+  @@index([utmSource])
+  @@index([utmCampaign])
+  @@index([createdAt])
+  @@index([deviceType])
+  @@index([landingPage])
+}
+
+// Analytics event — many per session
+model AnalyticsEvent {
+  id                String   @id @default(cuid())
+  sessionId         String
+  session           AnalyticsSession @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+
+  // Event data
+  eventType         AnalyticsEventType
+  page              String?  // URL path where event occurred
+  
+  // Element context (for clicks, form interactions)
+  elementId         String?  // e.g., "agreeScan", "url", "email"
+  elementType       String?  // e.g., "checkbox", "input", "button"
+  
+  // Flexible payload (event-specific data)
+  metadata          Json?    // { questionIndex: 3, scrollPercent: 75, ... }
+
+  // Timing
+  timestamp         DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([eventType, timestamp])
+  @@index([page])
+}
+
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  UNKNOWN
+}
+
+enum AnalyticsEventType {
+  // Navigation
+  PAGE_VIEW
+  SCROLL_DEPTH
+  SECTION_VIEW
+
+  // Form interactions (hero form)
+  FORM_FOCUS
+  FORM_INPUT
+  FORM_ERROR
+  FORM_SUBMIT
+  CHECKBOX_TOGGLE
+
+  // CTA & pricing
+  CTA_CLICK
+  PRICING_CARD_CLICK
+
+  // Scan lifecycle
+  SCAN_STARTED
+  SCAN_COMPLETED
+  SCAN_FAILED
+  SCAN_PHASE_SEEN
+
+  // Payment flow
+  CHECKOUT_STARTED
+  CHECKOUT_REDIRECT
+  PAYMENT_VERIFIED
+
+  // Report interactions
+  REPORT_VIEW
+  REPORT_CATEGORY_EXPAND
+  REPORT_ISSUE_EXPAND
+  DOWNLOAD_PDF
+
+  // Consent banner
+  CONSENT_ACCEPT
+  CONSENT_REJECT
+  CONSENT_CUSTOM
+
+  // UI interactions
+  LANGUAGE_SWITCH
+  LANGUAGE_DROPDOWN_OPEN
+  FAQ_EXPAND
+
+  // Errors & session
+  ERROR_SHOWN
+  SESSION_END
+}
