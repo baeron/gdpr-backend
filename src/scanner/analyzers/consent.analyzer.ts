@@ -97,6 +97,16 @@ export class ConsentAnalyzer {
       closeButtonRejects: null as boolean | null,
     };
 
+    const defaultTcf = {
+      detected: false,
+      version: null as string | null,
+      cmpId: null as number | null,
+      cmpVersion: null as number | null,
+      gdprApplies: null as boolean | null,
+      purposeConsents: [] as number[],
+      vendorConsents: [] as number[],
+    };
+
     const result: ConsentBannerInfo = {
       found: false,
       hasRejectButton: false,
@@ -104,6 +114,7 @@ export class ConsentAnalyzer {
       hasSettingsOption: false,
       isBlocking: false,
       quality: defaultQuality,
+      tcf: defaultTcf,
     };
 
     // Wait a bit for consent banner to appear
@@ -167,7 +178,109 @@ export class ConsentAnalyzer {
     // Analyze consent quality
     await this.analyzeConsentQuality(page, result);
 
+    // Detect TCF 2.0 API
+    result.tcf = await this.detectTcfApi(page);
+
     return result;
+  }
+
+  async detectTcfApi(page: Page): Promise<ConsentBannerInfo['tcf']> {
+    const defaultTcf: ConsentBannerInfo['tcf'] = {
+      detected: false,
+      version: null,
+      cmpId: null,
+      cmpVersion: null,
+      gdprApplies: null,
+      purposeConsents: [],
+      vendorConsents: [],
+    };
+
+    try {
+      const tcfData = await page.evaluate(() => {
+        return new Promise<{
+          detected: boolean;
+          version: string | null;
+          cmpId: number | null;
+          cmpVersion: number | null;
+          gdprApplies: boolean | null;
+          purposeConsents: number[];
+          vendorConsents: number[];
+        }>((resolve) => {
+          const win = window as any;
+
+          if (typeof win.__tcfapi !== 'function') {
+            resolve({
+              detected: false,
+              version: null,
+              cmpId: null,
+              cmpVersion: null,
+              gdprApplies: null,
+              purposeConsents: [],
+              vendorConsents: [],
+            });
+            return;
+          }
+
+          // Call getTCData with a timeout
+          const timeout = setTimeout(() => {
+            resolve({
+              detected: true,
+              version: null,
+              cmpId: null,
+              cmpVersion: null,
+              gdprApplies: null,
+              purposeConsents: [],
+              vendorConsents: [],
+            });
+          }, 3000);
+
+          win.__tcfapi('getTCData', 2, (tcData: any, success: boolean) => {
+            clearTimeout(timeout);
+
+            if (!success || !tcData) {
+              resolve({
+                detected: true,
+                version: null,
+                cmpId: null,
+                cmpVersion: null,
+                gdprApplies: null,
+                purposeConsents: [],
+                vendorConsents: [],
+              });
+              return;
+            }
+
+            const purposeConsents: number[] = [];
+            if (tcData.purpose?.consents) {
+              for (const [key, value] of Object.entries(tcData.purpose.consents)) {
+                if (value) purposeConsents.push(parseInt(key, 10));
+              }
+            }
+
+            const vendorConsents: number[] = [];
+            if (tcData.vendor?.consents) {
+              for (const [key, value] of Object.entries(tcData.vendor.consents)) {
+                if (value) vendorConsents.push(parseInt(key, 10));
+              }
+            }
+
+            resolve({
+              detected: true,
+              version: tcData.tcfPolicyVersion?.toString() || tcData.cmpVersion?.toString() || '2',
+              cmpId: tcData.cmpId ?? null,
+              cmpVersion: tcData.cmpVersion ?? null,
+              gdprApplies: tcData.gdprApplies ?? null,
+              purposeConsents,
+              vendorConsents,
+            });
+          });
+        });
+      });
+
+      return tcfData;
+    } catch {
+      return defaultTcf;
+    }
   }
 
   private async analyzeConsentQuality(

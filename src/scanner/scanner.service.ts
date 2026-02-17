@@ -8,12 +8,16 @@ import { SecurityAnalyzer, SecurityInfo } from './analyzers/security.analyzer';
 import { FormAnalyzer } from './analyzers/form.analyzer';
 import { DataTransferAnalyzer } from './analyzers/data-transfer.analyzer';
 import { TechnologyAnalyzer } from './analyzers/technology.analyzer';
+import { HeadersAnalyzer } from './analyzers/headers.analyzer';
+import { SslAnalyzer } from './analyzers/ssl.analyzer';
 import {
   ScanResultDto,
   ThirdPartyRequest,
   FormsAnalysisResult,
   DataTransferInfo,
   TechnologyDetectionResult,
+  SecurityHeadersInfo,
+  SslCertificateInfo,
 } from './dto/scan-result.dto';
 import { BrowserManagerService } from './browser-manager.service';
 import { IssueGeneratorService } from './issue-generator.service';
@@ -32,6 +36,8 @@ export class ScannerService {
   private readonly formAnalyzer: FormAnalyzer;
   private readonly dataTransferAnalyzer: DataTransferAnalyzer;
   private readonly technologyAnalyzer: TechnologyAnalyzer;
+  private readonly headersAnalyzer: HeadersAnalyzer;
+  private readonly sslAnalyzer: SslAnalyzer;
   private readonly browserManager: BrowserManagerService;
   private readonly issueGenerator: IssueGeneratorService;
   private readonly scoreCalculator: ScoreCalculatorService;
@@ -46,6 +52,8 @@ export class ScannerService {
     formAnalyzer?: FormAnalyzer,
     dataTransferAnalyzer?: DataTransferAnalyzer,
     technologyAnalyzer?: TechnologyAnalyzer,
+    headersAnalyzer?: HeadersAnalyzer,
+    sslAnalyzer?: SslAnalyzer,
     browserManager?: BrowserManagerService,
     issueGenerator?: IssueGeneratorService,
     scoreCalculator?: ScoreCalculatorService,
@@ -59,6 +67,8 @@ export class ScannerService {
     this.formAnalyzer = formAnalyzer ?? new FormAnalyzer();
     this.dataTransferAnalyzer = dataTransferAnalyzer ?? new DataTransferAnalyzer();
     this.technologyAnalyzer = technologyAnalyzer ?? new TechnologyAnalyzer();
+    this.headersAnalyzer = headersAnalyzer ?? new HeadersAnalyzer();
+    this.sslAnalyzer = sslAnalyzer ?? new SslAnalyzer();
     this.browserManager = browserManager ?? new BrowserManagerService();
     this.issueGenerator = issueGenerator ?? new IssueGeneratorService();
     this.scoreCalculator = scoreCalculator ?? new ScoreCalculatorService();
@@ -184,6 +194,16 @@ export class ScannerService {
         cookieSecurity: cookieSecurityInfo,
       };
 
+      // Phase 3b: HTTP Security Headers analysis
+      this.logger.log('Phase 3b: HTTP Security Headers analysis...');
+      const securityHeaders: SecurityHeadersInfo =
+        await this.headersAnalyzer.analyzeHeaders(page);
+
+      // Phase 3c: SSL/TLS Certificate analysis
+      this.logger.log('Phase 3c: SSL/TLS Certificate analysis...');
+      const sslCertificate: SslCertificateInfo =
+        await this.sslAnalyzer.analyzeSsl(normalizedUrl);
+
       // Phase 4: Form analysis
       this.logger.log('Phase 4: Form analysis...');
       const formsAnalysis = await this.formAnalyzer.analyzeForms(page);
@@ -241,6 +261,8 @@ export class ScannerService {
         security,
         forms,
         dataTransfers,
+        securityHeaders,
+        sslCertificate,
       );
 
       // Calculate overall risk level and score
@@ -276,6 +298,8 @@ export class ScannerService {
         consentBanner,
         privacyPolicy,
         security,
+        securityHeaders,
+        sslCertificate,
         forms,
         dataTransfers,
         technologies,

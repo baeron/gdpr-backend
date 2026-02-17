@@ -30,6 +30,15 @@ describe('PdfReportService', () => {
       categoryCount: 3,
       closeButtonRejects: null,
     },
+    tcf: {
+      detected: false,
+      version: null,
+      cmpId: null,
+      cmpVersion: null,
+      gdprApplies: null,
+      purposeConsents: [],
+      vendorConsents: [],
+    },
   };
 
   const defaultPrivacy: PrivacyPolicyInfo = {
@@ -102,6 +111,23 @@ describe('PdfReportService', () => {
     consentBanner: defaultConsent,
     privacyPolicy: defaultPrivacy,
     security: defaultSecurity,
+    securityHeaders: {
+      headers: {},
+      csp: { present: true, value: "default-src 'self'", hasDefaultSrc: true, hasScriptSrc: false, hasUnsafeInline: false, hasUnsafeEval: false },
+      hsts: { present: true, value: 'max-age=31536000', maxAge: 31536000, includesSubDomains: false, preload: false },
+      xFrameOptions: { present: true, value: 'DENY' },
+      xContentTypeOptions: { present: true, value: 'nosniff' },
+      referrerPolicy: { present: true, value: 'strict-origin-when-cross-origin' },
+      permissionsPolicy: { present: true, value: 'camera=(), microphone=()' },
+      missingHeaders: [],
+      score: 85,
+    },
+    sslCertificate: {
+      valid: true, issuer: "Let's Encrypt", subject: 'example.com',
+      validFrom: '2025-01-01T00:00:00Z', validTo: '2026-06-01T00:00:00Z',
+      daysUntilExpiry: 104, protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384',
+      keyExchange: null, selfSigned: false, error: null,
+    },
     forms: defaultForms,
     dataTransfers: defaultDataTransfers,
     technologies: defaultTechnologies,

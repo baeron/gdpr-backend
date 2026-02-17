@@ -19,6 +19,15 @@ describe('ConsentAnalyzer', () => {
       categoryCount: 3,
       closeButtonRejects: null,
     },
+    tcf: {
+      detected: false,
+      version: null,
+      cmpId: null,
+      cmpVersion: null,
+      gdprApplies: null,
+      purposeConsents: [],
+      vendorConsents: [],
+    },
   };
 
   describe('generateIssues', () => {

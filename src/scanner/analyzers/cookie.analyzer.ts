@@ -1,31 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Page, Cookie } from 'playwright';
 import { CookieInfo, RiskLevel, ScanIssue } from '../dto/scan-result.dto';
-
-const KNOWN_COOKIES: Record<
-  string,
-  { category: CookieInfo['category']; description: string }
-> = {
-  // Analytics
-  _ga: { category: 'analytics', description: 'Google Analytics' },
-  _gid: { category: 'analytics', description: 'Google Analytics' },
-  _gat: { category: 'analytics', description: 'Google Analytics' },
-  _gtag: { category: 'analytics', description: 'Google Tag Manager' },
-
-  // Marketing
-  _fbp: { category: 'marketing', description: 'Facebook Pixel' },
-  _fbc: { category: 'marketing', description: 'Facebook Click' },
-  fr: { category: 'marketing', description: 'Facebook' },
-  _gcl_au: { category: 'marketing', description: 'Google Ads' },
-  _gcl_aw: { category: 'marketing', description: 'Google Ads' },
-  IDE: { category: 'marketing', description: 'Google DoubleClick' },
-
-  // Necessary (common)
-  PHPSESSID: { category: 'necessary', description: 'PHP Session' },
-  JSESSIONID: { category: 'necessary', description: 'Java Session' },
-  csrftoken: { category: 'necessary', description: 'CSRF Protection' },
-  _csrf: { category: 'necessary', description: 'CSRF Protection' },
-};
+import {
+  KNOWN_COOKIES,
+  COOKIE_CATEGORY_PATTERNS,
+  KnownCookieEntry,
+} from '../data/known-cookies';
 
 @Injectable()
 export class CookieAnalyzer {
@@ -59,13 +39,13 @@ export class CookieAnalyzer {
 
   private findKnownCookie(
     name: string,
-  ): { category: CookieInfo['category']; description: string } | undefined {
+  ): KnownCookieEntry | undefined {
     // Exact match
     if (KNOWN_COOKIES[name]) {
       return KNOWN_COOKIES[name];
     }
 
-    // Prefix match (e.g., _ga_XXXXX)
+    // Prefix match (e.g., _ga_XXXXX, mp_xxxxx, amp_xxxxx)
     for (const [key, value] of Object.entries(KNOWN_COOKIES)) {
       if (name.startsWith(key)) {
         return value;
@@ -76,33 +56,10 @@ export class CookieAnalyzer {
   }
 
   private guessCategory(name: string): CookieInfo['category'] {
-    const lowerName = name.toLowerCase();
-
-    // Analytics patterns
-    if (
-      lowerName.includes('analytics') ||
-      lowerName.includes('_ga') ||
-      lowerName.includes('gtm')
-    ) {
-      return 'analytics';
-    }
-
-    // Marketing patterns
-    if (
-      lowerName.includes('ad') ||
-      lowerName.includes('marketing') ||
-      lowerName.includes('pixel')
-    ) {
-      return 'marketing';
-    }
-
-    // Necessary patterns
-    if (
-      lowerName.includes('session') ||
-      lowerName.includes('csrf') ||
-      lowerName.includes('auth')
-    ) {
-      return 'necessary';
+    for (const { category, patterns } of COOKIE_CATEGORY_PATTERNS) {
+      if (patterns.some((pattern) => pattern.test(name))) {
+        return category;
+      }
     }
 
     return 'unknown';

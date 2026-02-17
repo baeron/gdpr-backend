@@ -38,6 +38,15 @@ describe('IssueGeneratorService', () => {
       categoryCount: 3,
       closeButtonRejects: null,
     },
+    tcf: {
+      detected: false,
+      version: null,
+      cmpId: null,
+      cmpVersion: null,
+      gdprApplies: null,
+      purposeConsents: [],
+      vendorConsents: [],
+    },
   };
   const defaultPrivacy: PrivacyPolicyInfo = {
     found: true,

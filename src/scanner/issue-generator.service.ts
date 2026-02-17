@@ -8,6 +8,8 @@ import {
   PrivacyPolicyInfo,
   FormsAnalysisResult,
   DataTransferInfo,
+  SecurityHeadersInfo,
+  SslCertificateInfo,
 } from './dto/scan-result.dto';
 import { SecurityInfo } from './analyzers/security.analyzer';
 import { CookieAnalyzer } from './analyzers/cookie.analyzer';
@@ -17,6 +19,8 @@ import { PrivacyPolicyAnalyzer } from './analyzers/privacy-policy.analyzer';
 import { SecurityAnalyzer } from './analyzers/security.analyzer';
 import { FormAnalyzer } from './analyzers/form.analyzer';
 import { DataTransferAnalyzer } from './analyzers/data-transfer.analyzer';
+import { HeadersAnalyzer } from './analyzers/headers.analyzer';
+import { SslAnalyzer } from './analyzers/ssl.analyzer';
 
 /**
  * Generates GDPR compliance issues from scan analysis results.
@@ -41,6 +45,8 @@ export class IssueGeneratorService {
     security: SecurityInfo,
     forms: FormsAnalysisResult,
     dataTransfers: DataTransferInfo,
+    securityHeaders?: SecurityHeadersInfo,
+    sslCertificate?: SslCertificateInfo,
   ): ScanIssue[] {
     return [
       ...CookieAnalyzer.generateIssues(cookies),
@@ -51,6 +57,8 @@ export class IssueGeneratorService {
       ...SecurityAnalyzer.generateIssues(security),
       ...FormAnalyzer.generateIssues(forms),
       ...DataTransferAnalyzer.generateIssues(dataTransfers),
+      ...(securityHeaders ? HeadersAnalyzer.generateIssues(securityHeaders) : []),
+      ...(sslCertificate ? SslAnalyzer.generateIssues(sslCertificate) : []),
     ];
   }
 

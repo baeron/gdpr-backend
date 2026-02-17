@@ -49,6 +49,16 @@ export interface ConsentBannerInfo {
     categoryCount: number;
     closeButtonRejects: boolean | null;
   };
+  // TCF 2.0 (Phase 1.4)
+  tcf: {
+    detected: boolean;
+    version: string | null;
+    cmpId: number | null;
+    cmpVersion: number | null;
+    gdprApplies: boolean | null;
+    purposeConsents: number[];
+    vendorConsents: number[];
+  };
 }
 
 export interface PrivacyPolicyInfo {
@@ -134,6 +144,57 @@ export interface TechnologyDetectionResult {
   cdn: string | null;
 }
 
+export interface SecurityHeadersInfo {
+  headers: Record<string, string | null>;
+  csp: {
+    present: boolean;
+    value: string | null;
+    hasDefaultSrc: boolean;
+    hasScriptSrc: boolean;
+    hasUnsafeInline: boolean;
+    hasUnsafeEval: boolean;
+  };
+  hsts: {
+    present: boolean;
+    value: string | null;
+    maxAge: number | null;
+    includesSubDomains: boolean;
+    preload: boolean;
+  };
+  xFrameOptions: {
+    present: boolean;
+    value: string | null;
+  };
+  xContentTypeOptions: {
+    present: boolean;
+    value: string | null;
+  };
+  referrerPolicy: {
+    present: boolean;
+    value: string | null;
+  };
+  permissionsPolicy: {
+    present: boolean;
+    value: string | null;
+  };
+  missingHeaders: string[];
+  score: number;
+}
+
+export interface SslCertificateInfo {
+  valid: boolean;
+  issuer: string | null;
+  subject: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+  daysUntilExpiry: number | null;
+  protocol: string | null;
+  cipher: string | null;
+  keyExchange: string | null;
+  selfSigned: boolean;
+  error: string | null;
+}
+
 export interface ScanIssue {
   code: string;
   title: string;
@@ -190,6 +251,8 @@ export interface ScanResultDto {
   consentBanner: ConsentBannerInfo;
   privacyPolicy: PrivacyPolicyInfo;
   security: SecurityInfo;
+  securityHeaders: SecurityHeadersInfo;
+  sslCertificate: SslCertificateInfo;
   forms: FormsAnalysisResult;
   dataTransfers: DataTransferInfo;
   technologies: TechnologyDetectionResult;
