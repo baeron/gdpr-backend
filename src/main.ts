@@ -1,7 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -43,6 +45,21 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
+  // Security: Helmet middleware (removes X-Powered-By, adds security headers)
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"], // needed for Swagger UI
+          styleSrc: ["'self'", "'unsafe-inline'"],  // needed for Swagger UI
+          imgSrc: ["'self'", 'data:', 'https:'],
+        },
+      },
+      crossOriginEmbedderPolicy: false, // allow Swagger UI assets
+    }),
+  );
+
   // Enable CORS for frontend
   const allowedOrigins = [
     'http://localhost:4200',
@@ -81,6 +98,9 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
       transform: true,
     }),
   );
+
+  // Global exception filter (structured error responses + logging)
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   // Global prefix for API
   app.setGlobalPrefix('api');

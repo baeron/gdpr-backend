@@ -129,6 +129,9 @@ stages:
           - script: npx prisma generate
             displayName: 'Generate Prisma client'
 
+          - script: npm audit --audit-level=high || true
+            displayName: 'Security audit (npm)'
+
           - script: npm run test:cov
             displayName: 'Run unit tests with coverage'
 

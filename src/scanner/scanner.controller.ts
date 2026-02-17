@@ -10,6 +10,7 @@ import {
   Delete,
   Inject,
 } from '@nestjs/common';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -123,6 +124,7 @@ export class ScannerController {
     @Inject(QUEUE_SERVICE) private readonly queueService: IQueueService,
   ) {}
 
+  @Throttle({ short: { ttl: 60000, limit: 3 }, medium: { ttl: 3600000, limit: 20 } })
   @Post('scan')
   @ApiOperation({
     summary: 'Scan website for GDPR compliance',
@@ -287,6 +289,7 @@ Performs a comprehensive GDPR compliance scan on the specified website.
 
   // ============ ASYNC QUEUE ENDPOINTS ============
 
+  @Throttle({ short: { ttl: 60000, limit: 5 }, medium: { ttl: 3600000, limit: 30 } })
   @Post('queue')
   @ApiOperation({
     summary: 'Queue a scan (async, recommended)',
@@ -372,6 +375,7 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
     return { cancelled };
   }
 
+  @SkipThrottle()
   @Get('queue/stats')
   @ApiOperation({
     summary: 'Get queue statistics',

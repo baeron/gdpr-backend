@@ -75,9 +75,24 @@ export class ScannerService {
     this.urlUtils = urlUtils ?? new UrlUtilsService();
   }
 
+  private readonly SCAN_TIMEOUT_MS = 120_000; // 2 minutes max per scan
+
   async scanWebsite(url: string, retryCount = 0): Promise<ScanResultDto> {
     const startTime = Date.now();
     this.logger.log(`Starting scan for ${url}`);
+
+    // Timeout protection: abort scan if it takes too long
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Scan timed out after ${this.SCAN_TIMEOUT_MS / 1000}s`)),
+        this.SCAN_TIMEOUT_MS,
+      ),
+    );
+
+    return Promise.race([this.executeScan(url, retryCount, startTime), timeoutPromise]);
+  }
+
+  private async executeScan(url: string, retryCount: number, startTime: number): Promise<ScanResultDto> {
 
     // Normalize URL
     const normalizedUrl = this.urlUtils.normalizeUrl(url);

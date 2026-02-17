@@ -1,11 +1,13 @@
 import { Controller, Get, HttpStatus, Res, Inject } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { HealthService } from './health.service';
 import type { HealthStatus, LivenessStatus } from './health.service';
 import { QUEUE_SERVICE } from '../scanner/queue/queue.interface';
 import type { IQueueService } from '../scanner/queue/queue.interface';
 
+@SkipThrottle()
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
