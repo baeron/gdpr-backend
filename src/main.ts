@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -6,7 +7,11 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  
+  // Trust proxy is required for correct IP detection behind load balancers/reverse proxies
+  // This is critical for ThrottlerGuard (rate limiting) to work per-IP rather than globally
+  app.set('trust proxy', 1);
 
   // Swagger/OpenAPI documentation
   const config = new DocumentBuilder()

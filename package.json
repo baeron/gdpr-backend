@@ -23,7 +23,7 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
-    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-express": "^11.1.14",
     "@nestjs/swagger": "^11.2.3",
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "5.22.0",
@@ -39,6 +39,7 @@
     "rxjs": "^7.8.1",
     "stripe": "^20.1.1",
     "swagger-ui-express": "^5.0.1",
+    "tldts": "^7.0.23",
     "ua-parser-js": "^2.0.9"
   },
   "optionalDependencies": {
@@ -53,7 +54,7 @@
     "@types/express": "^5.0.0",
     "@types/geoip-lite": "^1.4.4",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.10.7",
+    "@types/node": "^22.19.11",
     "@types/pdfkit": "^0.17.5",
     "@types/supertest": "^6.0.2",
     "@types/ua-parser-js": "^0.7.39",

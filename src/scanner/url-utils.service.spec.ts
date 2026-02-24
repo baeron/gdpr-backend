@@ -60,6 +60,35 @@ describe('UrlUtilsService', () => {
     });
   });
 
+  describe('validateAndCheckUrl', () => {
+    it('should reject blacklisted domains', async () => {
+      const result = await service.validateAndCheckUrl('https://google.com/test');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('not allowed');
+    });
+
+    it('should reject adult sites', async () => {
+      const result = await service.validateAndCheckUrl('https://pornhub.com');
+      expect(result.isValid).toBe(false);
+    });
+
+    it('should reject .gov domains', async () => {
+      const result = await service.validateAndCheckUrl('https://whitehouse.gov');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('not allowed');
+    });
+
+    it('should reject .edu domains', async () => {
+      const result = await service.validateAndCheckUrl('https://harvard.edu');
+      expect(result.isValid).toBe(false);
+    });
+
+    it('should handle invalid URLs', async () => {
+      const result = await service.validateAndCheckUrl('http://not-a-valid-domain-%#@.com');
+      expect(result.isValid).toBe(false);
+    });
+  });
+
   describe('mergeCookies', () => {
     const makeCookie = (name: string, domain: string, beforeConsent: boolean): CookieInfo => ({
       name,

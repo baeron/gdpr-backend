@@ -9,7 +9,10 @@ import {
   Patch,
   Delete,
   Inject,
+  BadRequestException,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import {
   ApiTags,
@@ -28,6 +31,7 @@ import {
 } from 'class-validator';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
+import { UrlUtilsService } from './url-utils.service';
 import { QUEUE_SERVICE } from './queue/queue.interface';
 import type { IQueueService } from './queue/queue.interface';
 import { ScanResultDto } from './dto/scan-result.dto';
@@ -121,6 +125,7 @@ export class ScannerController {
   constructor(
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
+    private readonly urlUtils: UrlUtilsService,
     @Inject(QUEUE_SERVICE) private readonly queueService: IQueueService,
   ) {}
 
@@ -169,7 +174,12 @@ Performs a comprehensive GDPR compliance scan on the specified website.
   ): Promise<ScanResultDto & { reportId?: string }> {
     this.logger.log(`Received scan request for: ${body.websiteUrl}`);
 
-    const result = await this.scannerService.scanWebsite(body.websiteUrl);
+    const validation = await this.urlUtils.validateAndCheckUrl(body.websiteUrl);
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.error || 'Invalid URL provided.');
+    }
+
+    const result = await this.scannerService.scanWebsite(validation.normalizedUrl);
 
     // Optionally save to database
     if (body.saveToDb !== false) {
@@ -321,9 +331,21 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
       },
     },
   })
-  async queueScan(@Body() body: QueueScanRequestDto) {
+  async queueScan(@Body() body: QueueScanRequestDto, @Req() request: Request) {
     this.logger.log(`Queueing scan for: ${body.websiteUrl}`);
-    return this.queueService.addJob(body);
+    
+    const validation = await this.urlUtils.validateAndCheckUrl(body.websiteUrl);
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.error || 'Invalid URL provided.');
+    }
+
+    body.websiteUrl = validation.normalizedUrl;
+    
+    // Pass client IP to queue service
+    return this.queueService.addJob({
+      ...body,
+      clientIp: request.ip
+    });
   }
 
   @Get('job/:id')

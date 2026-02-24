@@ -113,7 +113,7 @@ export class AnalyticsService {
       page: event.page || null,
       elementId: event.elementId || null,
       elementType: event.elementType || null,
-      metadata: event.metadata || undefined,
+      metadata: event.metadata ? (event.metadata as any) : undefined,
       timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
     }));
 

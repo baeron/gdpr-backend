@@ -88,12 +88,27 @@ export class RedisQueueService implements IQueueService {
   async addJob(job: QueuedJob): Promise<JobStatus> {
     this.logger.log(`Queueing scan for: ${job.websiteUrl}`);
 
+    // Rate limiting check
+    if (job.clientIp) {
+      const activeJobsCount = await (this.prisma as any).scanJob.count({
+        where: {
+          clientIp: job.clientIp,
+          status: { in: ['QUEUED', 'PROCESSING'] },
+        },
+      });
+
+      if (activeJobsCount >= 3) {
+        throw new Error('You have reached the maximum number of concurrent scans (3). Please wait for them to finish.');
+      }
+    }
+
     // Create DB record first
     const dbJob = await (this.prisma as any).scanJob.create({
       data: {
         websiteUrl: job.websiteUrl,
         auditRequestId: job.auditRequestId,
         userEmail: job.userEmail,
+        clientIp: job.clientIp,
         locale: job.locale || 'en',
         priority: job.priority || 0,
         status: 'QUEUED',

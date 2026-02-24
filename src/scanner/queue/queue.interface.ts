@@ -4,6 +4,7 @@ export interface QueuedJob {
   websiteUrl: string;
   auditRequestId?: string;
   userEmail?: string;
+  clientIp?: string;
   locale?: string;
   priority?: number;
 }

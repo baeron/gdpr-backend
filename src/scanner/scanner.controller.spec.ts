@@ -4,11 +4,14 @@ import { ScannerReportService } from './scanner-report.service';
 import { IQueueService } from './queue/queue.interface';
 import { RiskLevel, ScanResultDto } from './dto/scan-result.dto';
 
+import { UrlUtilsService } from './url-utils.service';
+
 describe('ScannerController', () => {
   let controller: ScannerController;
   let mockScannerService: Partial<ScannerService>;
   let mockReportService: Partial<ScannerReportService>;
   let mockQueueService: Partial<IQueueService>;
+  let mockUrlUtils: Partial<UrlUtilsService>;
 
   const mockScanResult: ScanResultDto = {
     websiteUrl: 'https://example.com',
@@ -53,7 +56,7 @@ describe('ScannerController', () => {
 
   beforeEach(() => {
     mockScannerService = {
-      scanWebsite: jest.fn().mockResolvedValue(mockScanResult),
+      scanWebsite: jest.fn().mockResolvedValue({ score: 85, issues: [] }),
     };
     mockReportService = {
       saveScanResult: jest.fn().mockResolvedValue('report-123'),
@@ -67,9 +70,13 @@ describe('ScannerController', () => {
       cancelJob: jest.fn().mockResolvedValue(true),
       getStats: jest.fn().mockResolvedValue({ queued: 2, processing: 1, completed: 10, failed: 0 }),
     };
+    mockUrlUtils = {
+      validateAndCheckUrl: jest.fn().mockImplementation((url) => Promise.resolve({ isValid: true, normalizedUrl: url }))
+    };
     controller = new ScannerController(
       mockScannerService as ScannerService,
       mockReportService as ScannerReportService,
+      mockUrlUtils as UrlUtilsService,
       mockQueueService as IQueueService,
     );
   });
