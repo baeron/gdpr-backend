@@ -448,9 +448,9 @@ stages:
                   condition: succeeded()
 
   # ============================================
-  # Stage 4: Deploy Cloud Run Worker (after PROD)
+  # Stage 4: Deploy Cloud Run Worker (after PROD) - DISABLED
   # ============================================
-  - stage: DeployCloudRunWorker
+  # - stage: DeployCloudRunWorker
     displayName: 'Deploy Cloud Run Worker'
     dependsOn: DeployProd
     condition: succeeded()
