@@ -451,18 +451,18 @@ stages:
   # Stage 4: Deploy Cloud Run Worker (after PROD) - DISABLED
   # ============================================
   # - stage: DeployCloudRunWorker
-    displayName: 'Deploy Cloud Run Worker'
-    dependsOn: DeployProd
-    condition: succeeded()
-    variables:
-      - group: gdpr-secrets-prod
-      - name: GCP_PROJECT_ID
-        value: 'gdpr-scanner-worker'
-      - name: GCP_REGION
-        value: 'europe-west1'
-      - name: CLOUD_RUN_SERVICE
-        value: 'gdpr-scanner-worker'
-    jobs:
+  #   displayName: 'Deploy Cloud Run Worker'
+  #   dependsOn: DeployProd
+  #   condition: succeeded()
+  #   variables:
+  #     - group: gdpr-secrets-prod
+  #     - name: GCP_PROJECT_ID
+  #       value: 'gdpr-scanner-worker'
+  #     - name: GCP_REGION
+  #       value: 'europe-west1'
+  #     - name: CLOUD_RUN_SERVICE
+  #       value: 'gdpr-scanner-worker'
+  #   jobs:
       - deployment: DeployWorker
         displayName: 'Deploy to Google Cloud Run'
         pool:
