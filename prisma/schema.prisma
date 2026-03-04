@@ -216,6 +216,55 @@ model Payment {
   @@index([status])
 }
 
+// Launch campaign purchases with dynamic geo-based pricing
+model LaunchPurchase {
+  id                    String        @id @default(cuid())
+  reportId              String
+  
+  // Stripe data
+  stripeSessionId       String?       @unique
+  stripePaymentIntentId String?
+  
+  // Dynamic pricing data
+  region                PricingRegion // EU, US, UK, ASIA, LATAM, OTHER
+  slotNumber            Int           // Position in queue for this region (1, 2, 3...)
+  priceEur              Int           // Actual price paid in EUR (1-99)
+  
+  // Geo data (for analytics)
+  country               String?       // ISO 3166-1 alpha-2
+  city                  String?
+  ipHash                String?       // SHA-256 hash for privacy
+  
+  // Status
+  status                PaymentStatus @default(PENDING)
+  
+  // User info
+  userEmail             String?
+  
+  // Campaign tracking
+  campaignId            String        @default("launch-2026")
+  
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([reportId])
+  @@index([region])
+  @@index([slotNumber])
+  @@index([campaignId])
+  @@index([stripeSessionId])
+  @@index([status])
+  @@index([region, slotNumber])
+}
+
+enum PricingRegion {
+  EU      // European Union
+  US      // United States + Canada
+  UK      // United Kingdom
+  ASIA    // Asia-Pacific (Japan, Singapore, Korea, etc.)
+  LATAM   // Latin America
+  OTHER   // Rest of world
+}
+
 enum PaymentStatus {
   PENDING
   COMPLETED

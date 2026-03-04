@@ -14,12 +14,16 @@ import { SecurityAnalyzer } from './analyzers/security.analyzer';
 import { FormAnalyzer } from './analyzers/form.analyzer';
 import { DataTransferAnalyzer } from './analyzers/data-transfer.analyzer';
 import { TechnologyAnalyzer } from './analyzers/technology.analyzer';
+import { HeadersAnalyzer } from './analyzers/headers.analyzer';
+import { SslAnalyzer } from './analyzers/ssl.analyzer';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_SERVICE } from './queue/queue.interface';
 import type { IQueueService } from './queue/queue.interface';
 import { PostgresQueueService } from './queue/postgres-queue.service';
 import { RedisQueueService } from './queue/redis-queue.service';
+import { CloudRunQueueService } from './queue/cloudrun-queue.service';
+import { HybridQueueService } from './queue/hybrid-queue.service';
 
 const queueProvider = {
   provide: QUEUE_SERVICE,
@@ -28,15 +32,25 @@ const queueProvider = {
     scanner: ScannerService,
     report: ScannerReportService,
   ) => {
-    const queueType = process.env.QUEUE_TYPE || 'postgres';
+    const queueType = process.env.QUEUE_TYPE || 'redis';
 
-    if (queueType === 'redis') {
-      console.log('📦 Using Redis/BullMQ queue');
-      return new RedisQueueService(prisma, scanner, report);
+    switch (queueType) {
+      case 'hybrid':
+        console.log('🔀 Using Hybrid queue (Redis local + Cloud Run overflow)');
+        return new HybridQueueService(prisma, scanner, report);
+
+      case 'redis':
+        console.log('📦 Using Redis/BullMQ queue');
+        return new RedisQueueService(prisma, scanner, report);
+
+      case 'cloudrun':
+        console.log('☁️  Using Cloud Run serverless worker');
+        return new CloudRunQueueService(prisma);
+
+      default:
+        console.log('📦 Using PostgreSQL queue');
+        return new PostgresQueueService(prisma, scanner, report);
     }
-
-    console.log('📦 Using PostgreSQL queue');
-    return new PostgresQueueService(prisma, scanner, report);
   },
   inject: [PrismaService, ScannerService, ScannerReportService],
 };
@@ -53,6 +67,8 @@ const queueProvider = {
     FormAnalyzer,
     DataTransferAnalyzer,
     TechnologyAnalyzer,
+    HeadersAnalyzer,
+    SslAnalyzer,
     BrowserManagerService,
     IssueGeneratorService,
     ScoreCalculatorService,

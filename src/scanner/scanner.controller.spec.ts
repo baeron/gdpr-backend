@@ -137,8 +137,13 @@ describe('ScannerController', () => {
   describe('queueScan', () => {
     it('should queue a scan job', async () => {
       const body: QueueScanRequestDto = { websiteUrl: 'https://example.com' };
-      const result = await controller.queueScan(body);
-      expect(mockQueueService.addJob).toHaveBeenCalledWith(body);
+      const requestMock = { ip: '127.0.0.1' } as any;
+      
+      const result = await controller.queueScan(body, requestMock);
+      expect(mockQueueService.addJob).toHaveBeenCalledWith({
+        ...body,
+        clientIp: '127.0.0.1'
+      });
       expect(result).toHaveProperty('status', 'QUEUED');
     });
   });

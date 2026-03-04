@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import * as Sentry from '@sentry/node';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -40,11 +41,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         `Unhandled exception: ${exception.message}`,
         exception.stack,
       );
+      
+      // Capture 500+ errors in Sentry
+      Sentry.captureException(exception);
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Internal server error';
       errorCode = 'UnknownError';
       this.logger.error(`Unknown exception type: ${JSON.stringify(exception)}`);
+      
+      Sentry.captureException(exception);
     }
 
     const errorResponse = {

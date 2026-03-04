@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { RedisModule } from '@nestjs-modules/ioredis';
 import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -11,12 +12,20 @@ import { ScannerModule } from './scanner/scanner.module';
 import { PaymentModule } from './payment/payment.module';
 import { HealthModule } from './health/health.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { PricingModule } from './pricing/pricing.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+    }),
+    RedisModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'single',
+        url: config.get('REDIS_URL', 'redis://localhost:6379'),
+      }),
     }),
     PrismaModule,
     EmailModule,
@@ -25,6 +34,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     PaymentModule,
     HealthModule,
     AnalyticsModule,
+    PricingModule,
     ThrottlerModule.forRoot([
       {
         name: 'short',

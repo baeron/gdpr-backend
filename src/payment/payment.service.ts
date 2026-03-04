@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
+import { PricingService } from '../pricing/pricing.service';
+import { GeoService } from '../pricing/geo.service';
 
 export interface PricingConfig {
   amount: number; // in cents
@@ -32,6 +34,8 @@ export class PaymentService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly pricingService?: PricingService,
+    private readonly geoService?: GeoService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -60,6 +64,109 @@ export class PaymentService {
       amount: pricing[selectedVariant],
       currency,
       variant: selectedVariant,
+    };
+  }
+
+  /**
+   * Create Stripe Checkout Session for launch campaign with dynamic pricing
+   */
+  async createLaunchCheckoutSession(params: {
+    reportId: string;
+    userEmail?: string;
+    clientIp: string;
+    country?: string;
+    city?: string;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ 
+    sessionId: string; 
+    url: string; 
+    priceEur: number;
+    region: string;
+    slotNumber: number;
+  }> {
+    if (!this.stripe) {
+      throw new Error('Payment service not configured - STRIPE_SECRET_KEY missing');
+    }
+
+    if (!this.pricingService || !this.geoService) {
+      throw new Error('Pricing service not available for launch campaign');
+    }
+
+    // Determine region from country or IP
+    let region: any;
+    if (params.country) {
+      region = this.pricingService.getRegionFromCountry(params.country);
+    } else {
+      const geoData = await this.geoService.getGeoFromIP(params.clientIp);
+      region = geoData 
+        ? this.pricingService.getRegionFromCountry(geoData.country)
+        : 'OTHER';
+    }
+
+    // Reserve slot and get dynamic price
+    const { slotNumber, price } = await this.pricingService.reserveSlot(region);
+
+    this.logger.log(
+      `Creating launch checkout for report ${params.reportId}, ` +
+      `region: ${region}, slot: ${slotNumber}, price: €${price}`,
+    );
+
+    // Create launch purchase record
+    const ipHash = this.geoService.hashIP(params.clientIp);
+    const launchPurchase = await this.pricingService.recordPurchase({
+      reportId: params.reportId,
+      region,
+      slotNumber,
+      priceEur: price,
+      country: params.country,
+      city: params.city,
+      ipHash,
+      userEmail: params.userEmail,
+    });
+
+    // Create Stripe checkout session
+    const session = await this.stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'eur',
+            product_data: {
+              name: 'GDPR Detailed Report - Launch Special',
+              description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
+            },
+            unit_amount: price * 100, // Convert to cents
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: params.cancelUrl,
+      customer_email: params.userEmail,
+      metadata: {
+        reportId: params.reportId,
+        launchPurchaseId: launchPurchase.id,
+        region,
+        slotNumber: slotNumber.toString(),
+        priceEur: price.toString(),
+        campaignId: 'launch-2026',
+      },
+    });
+
+    // Update launch purchase with Stripe session ID
+    await this.prisma.launchPurchase.update({
+      where: { id: launchPurchase.id },
+      data: { stripeSessionId: session.id },
+    });
+
+    return {
+      sessionId: session.id,
+      url: session.url!,
+      priceEur: price,
+      region,
+      slotNumber,
     };
   }
 
@@ -254,7 +361,26 @@ export class PaymentService {
 
     const reportId = session.metadata?.reportId;
     const paymentId = session.metadata?.paymentId;
+    const launchPurchaseId = session.metadata?.launchPurchaseId;
 
+    // Handle launch campaign purchase
+    if (launchPurchaseId && this.pricingService) {
+      await this.pricingService.updatePurchaseStatus(
+        session.id,
+        'COMPLETED',
+        session.payment_intent as string,
+      );
+      this.logger.log(`Launch purchase completed: ${launchPurchaseId}`);
+      
+      // Broadcast pricing update to WebSocket clients
+      const region = session.metadata?.region;
+      if (region) {
+        // Note: Gateway broadcast will be called via PricingGateway injection
+        this.logger.log(`Price updated for region ${region}`);
+      }
+    }
+
+    // Handle regular payment
     if (paymentId) {
       await this.prisma.payment.update({
         where: { id: paymentId },
@@ -265,6 +391,7 @@ export class PaymentService {
       });
     }
 
+    // Unlock full report for both types of purchases
     if (reportId) {
       await this.prisma.auditReport.update({
         where: { id: reportId },

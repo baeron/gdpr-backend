@@ -446,3 +446,79 @@ stages:
                     EOF
                   displayName: 'Cleanup old images'
                   condition: succeeded()
+
+  # ============================================
+  # Stage 4: Deploy Cloud Run Worker (after PROD)
+  # ============================================
+  - stage: DeployCloudRunWorker
+    displayName: 'Deploy Cloud Run Worker'
+    dependsOn: DeployProd
+    condition: succeeded()
+    variables:
+      - group: gdpr-secrets-prod
+      - name: GCP_PROJECT_ID
+        value: 'gdpr-scanner-worker'
+      - name: GCP_REGION
+        value: 'europe-west1'
+      - name: CLOUD_RUN_SERVICE
+        value: 'gdpr-scanner-worker'
+    jobs:
+      - deployment: DeployWorker
+        displayName: 'Deploy to Google Cloud Run'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloud-run-worker'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: DownloadSecureFile@1
+                  name: gcpServiceAccount
+                  displayName: 'Download GCP Service Account Key'
+                  inputs:
+                    secureFile: 'gcp-service-account.json'
+
+                - script: |
+                    # Install gcloud CLI
+                    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+                    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+                    sudo apt-get update && sudo apt-get install -y google-cloud-sdk
+                  displayName: 'Install gcloud CLI'
+
+                - script: |
+                    # Authenticate with GCP
+                    gcloud auth activate-service-account --key-file=$(gcpServiceAccount.secureFilePath)
+                    gcloud config set project $(GCP_PROJECT_ID)
+                  displayName: 'Authenticate with GCP'
+
+                - script: |
+                    # Build DATABASE_URL from secrets
+                    DATABASE_URL="postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@45.63.119.28:5432/$(POSTGRES_DB)?schema=public"
+                    
+                    # Deploy to Cloud Run
+                    gcloud run deploy $(CLOUD_RUN_SERVICE) \
+                      --source . \
+                      --region=$(GCP_REGION) \
+                      --platform=managed \
+                      --allow-unauthenticated \
+                      --set-env-vars="DATABASE_URL=${DATABASE_URL}" \
+                      --max-instances=3 \
+                      --min-instances=0 \
+                      --memory=512Mi \
+                      --cpu=1 \
+                      --timeout=300s \
+                      --concurrency=1
+                  displayName: 'Deploy to Cloud Run'
+
+                - script: |
+                    # Test the deployment
+                    SERVICE_URL=$(gcloud run services describe $(CLOUD_RUN_SERVICE) \
+                      --region=$(GCP_REGION) \
+                      --format='value(status.url)')
+                    
+                    echo "Testing Cloud Run service at: ${SERVICE_URL}/health"
+                    curl -f "${SERVICE_URL}/health" || exit 1
+                    echo "Cloud Run Worker deployment successful!"
+                  displayName: 'Test Cloud Run Deployment'

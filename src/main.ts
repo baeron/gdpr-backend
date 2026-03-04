@@ -3,10 +3,22 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
 
 async function bootstrap() {
+  // Initialize Sentry
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN, // Will do nothing if DSN is undefined
+    integrations: [nodeProfilingIntegration()],
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
+    profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
+    environment: process.env.NODE_ENV || 'development',
+  });
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // Trust proxy is required for correct IP detection behind load balancers/reverse proxies
@@ -106,6 +118,9 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
 
   // Global exception filter (structured error responses + logging)
   app.useGlobalFilters(new GlobalExceptionFilter());
+
+  // Global request timeout interceptor (30s)
+  app.useGlobalInterceptors(new TimeoutInterceptor());
 
   // Global prefix for API
   app.setGlobalPrefix('api');
