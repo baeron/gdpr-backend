@@ -14,19 +14,29 @@ import { HealthModule } from './health/health.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PricingModule } from './pricing/pricing.module';
 
+// Conditional Redis import - only when needed
+const queueType = process.env.QUEUE_TYPE || 'postgres';
+const needsRedis = ['redis', 'hybrid'].includes(queueType) || process.env.REDIS_URL;
+
+const conditionalImports = needsRedis
+  ? [
+      RedisModule.forRootAsync({
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          type: 'single',
+          url: config.get('REDIS_URL', 'redis://localhost:6379'),
+        }),
+      }),
+    ]
+  : [];
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
-    RedisModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'single',
-        url: config.get('REDIS_URL', 'redis://localhost:6379'),
-      }),
-    }),
+    ...conditionalImports,
     PrismaModule,
     EmailModule,
     AuditModule,

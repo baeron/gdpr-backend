@@ -42,7 +42,6 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       QUEUE_TYPE: ${QUEUE_TYPE:-postgres}
-      REDIS_URL: redis://gdpr-redis-dev:6379
       WORKER_ENABLED: "true"
     ports:
       - "127.0.0.1:3001:3000"

@@ -27,28 +27,71 @@ GDPR Audit Backend - API сервер для анализа веб-сайтов 
 
 ## Queue System
 
-Проект поддерживает два типа очередей для обработки сканирований:
+Проект поддерживает **4 режима работы очереди** для обработки сканирований:
 
-### PostgreSQL Queue (по умолчанию)
-- Использует базу данных PostgreSQL для хранения задач
-- Не требует дополнительных сервисов
-- Подходит для небольших нагрузок
-
-### Redis/BullMQ Queue
-- Использует Redis и BullMQ для высокопроизводительной очереди
-- Рекомендуется для production с высокой нагрузкой
-- Включается через параметр `enableRedis=true` в Azure DevOps pipeline
-
-**Переменные окружения:**
+### 1. PostgreSQL Queue (по умолчанию)
 ```bash
-QUEUE_TYPE=postgres|redis  # Тип очереди (по умолчанию: postgres)
-REDIS_URL=redis://localhost:6379  # URL Redis сервера (только для redis)
-WORKER_CONCURRENCY=1  # Количество параллельных обработчиков
+QUEUE_TYPE=postgres
+```
+- ✅ Использует базу данных PostgreSQL для хранения задач
+- ✅ Не требует дополнительных сервисов (Redis)
+- ✅ Простая настройка и деплой
+- ⚠️ Подходит для небольших и средних нагрузок
+- 💡 **Use case:** Development, staging, малый/средний production
+
+### 2. Redis/BullMQ Queue
+```bash
+QUEUE_TYPE=redis
+REDIS_URL=redis://localhost:6379
+```
+- ✅ Высокопроизводительная очередь на базе Redis и BullMQ
+- ✅ Локальный worker обрабатывает все задачи на VPS
+- ✅ Лучшая производительность для высоких нагрузок
+- ⚠️ Требует Redis сервер (дополнительная RAM ~64-128MB)
+- 💡 **Use case:** Production с высокой нагрузкой, все задачи обрабатываются локально
+
+### 3. Hybrid Queue (Redis + Cloud Run overflow)
+```bash
+QUEUE_TYPE=hybrid
+REDIS_URL=redis://localhost:6379
+WORKER_URL=https://your-worker.run.app
+OVERFLOW_QUEUE_THRESHOLD=2
+OVERFLOW_WAIT_THRESHOLD_SEC=120
+```
+- ✅ Оптимизация затрат: 90%+ задач обрабатываются локально (бесплатно)
+- ✅ При пиковых нагрузках автоматически использует Cloud Run
+- ✅ Cloud Run масштабируется до нуля ($0 в idle)
+- ⚠️ Требует Redis + настройку Cloud Run worker
+- 💡 **Use case:** Production с переменной нагрузкой, оптимизация затрат
+
+### 4. Cloud Run Queue (serverless only)
+```bash
+QUEUE_TYPE=cloudrun
+WORKER_URL=https://your-worker.run.app
+```
+- ✅ Полностью serverless, масштабируется автоматически
+- ✅ Не требует постоянно работающего VPS worker
+- ⚠️ Выше стоимость при постоянной нагрузке
+- 💡 **Use case:** Serverless архитектура, спорадические нагрузки
+
+---
+
+**Общие переменные окружения:**
+```bash
+QUEUE_TYPE=postgres|redis|hybrid|cloudrun  # Тип очереди (по умолчанию: postgres)
+REDIS_URL=redis://localhost:6379           # URL Redis (для redis/hybrid)
+WORKER_ENABLED=true                        # Включить локальный worker
+WORKER_CONCURRENCY=1                       # Параллельные обработчики
+WORKER_URL=https://worker.run.app          # URL Cloud Run worker (для hybrid/cloudrun)
+OVERFLOW_QUEUE_THRESHOLD=2                 # Порог очереди для overflow (hybrid)
+OVERFLOW_WAIT_THRESHOLD_SEC=120            # Порог ожидания для overflow (hybrid)
 ```
 
 **Docker Compose профили:**
-- `postgres` - API с PostgreSQL очередью
+- `postgres` - API с PostgreSQL очередью (по умолчанию)
 - `redis` - API с Redis/BullMQ очередью
+
+**Важно:** При использовании `QUEUE_TYPE=postgres` RedisModule не инициализируется, что экономит ресурсы и предотвращает ошибки подключения к несуществующему Redis.
 
 ## Project setup
 
