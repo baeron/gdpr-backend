@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
@@ -58,10 +58,14 @@ export class PricingService {
   };
 
   constructor(
-    @InjectRedis() private readonly redis: Redis,
+    @Optional() @InjectRedis() private readonly redis: Redis | null,
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    if (!this.redis) {
+      this.logger.warn('Redis not available - pricing features will use fallback mode');
+    }
+  }
 
   /**
    * Determine pricing region from country code
@@ -75,9 +79,25 @@ export class PricingService {
    * Get current pricing info for a region
    */
   async getCurrentPricing(region: PricingRegion): Promise<PricingInfo> {
-    const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
-    const currentSlot = await this.redis.get(counterKey);
-    const slotNumber = currentSlot ? parseInt(currentSlot, 10) : 0;
+    let slotNumber = 0;
+    
+    if (this.redis) {
+      const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
+      const currentSlot = await this.redis.get(counterKey);
+      slotNumber = currentSlot ? parseInt(currentSlot, 10) : 0;
+    } else {
+      // Fallback to database if Redis is not available
+      const maxSlot = await this.prisma.launchPurchase.findFirst({
+        where: {
+          region,
+          campaignId: this.CAMPAIGN_ID,
+          status: 'COMPLETED',
+        },
+        orderBy: { slotNumber: 'desc' },
+        select: { slotNumber: true },
+      });
+      slotNumber = maxSlot?.slotNumber || 0;
+    }
     
     const currentPrice = Math.min(slotNumber + 1, this.MAX_PRICE);
     const nextPrice = Math.min(slotNumber + 2, this.MAX_PRICE);
@@ -111,6 +131,24 @@ export class PricingService {
    * Returns the slot number and price for this purchase
    */
   async reserveSlot(region: PricingRegion): Promise<{ slotNumber: number; price: number }> {
+    if (!this.redis) {
+      this.logger.warn('Redis not available - using database fallback for slot reservation');
+      // Fallback: get max slot from database and increment
+      const maxSlot = await this.prisma.launchPurchase.findFirst({
+        where: {
+          region,
+          campaignId: this.CAMPAIGN_ID,
+        },
+        orderBy: { slotNumber: 'desc' },
+        select: { slotNumber: true },
+      });
+      const slotNumber = (maxSlot?.slotNumber || 0) + 1;
+      const price = Math.min(slotNumber, this.MAX_PRICE);
+      
+      this.logger.log(`Reserved slot ${slotNumber} for region ${region} at €${price} (DB fallback)`);
+      return { slotNumber, price };
+    }
+    
     const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
     
     // Atomic increment
@@ -229,6 +267,11 @@ export class PricingService {
    * Reset counters (for testing or new campaign)
    */
   async resetCounters() {
+    if (!this.redis) {
+      this.logger.warn('Redis not available - cannot reset counters');
+      return;
+    }
+    
     const regions: PricingRegion[] = ['EU', 'US', 'UK', 'ASIA', 'LATAM', 'OTHER'];
     
     for (const region of regions) {
@@ -243,6 +286,11 @@ export class PricingService {
    * Initialize counters from database (in case Redis was cleared)
    */
   async initializeCountersFromDatabase() {
+    if (!this.redis) {
+      this.logger.warn('Redis not available - cannot initialize counters');
+      return;
+    }
+    
     const regions: PricingRegion[] = ['EU', 'US', 'UK', 'ASIA', 'LATAM', 'OTHER'];
     
     for (const region of regions) {
