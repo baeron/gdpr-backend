@@ -27,13 +27,11 @@ pr:
 variables:
   nodeVersion: '20.x'
   npmCacheFolder: $(Pipeline.Workspace)/.npm
-  # Queue configuration based on parameter
+  defaultWorkerDeployEnabled: 'false'
   ${{ if eq(parameters.enableRedis, true) }}:
-    queueType: 'redis'
-    dockerProfile: 'redis'
+    defaultQueueType: 'redis'
   ${{ else }}:
-    queueType: 'postgres'
-    dockerProfile: 'postgres'
+    defaultQueueType: 'postgres'
 
 stages:
   # ============================================
@@ -266,18 +264,28 @@ stages:
                   displayName: 'Copy files to server'
 
                 - script: |
-                    QUEUE_TYPE="$(queueType)"
-                    DOCKER_PROFILE="$(dockerProfile)"
+                    QUEUE_TYPE_VALUE="$(QUEUE_TYPE)"
+                    if [ -z "${QUEUE_TYPE_VALUE}" ] || [ "${QUEUE_TYPE_VALUE}" = '$(QUEUE_TYPE)' ]; then
+                      QUEUE_TYPE_VALUE="$(defaultQueueType)"
+                    fi
+
+                    case "${QUEUE_TYPE_VALUE}" in
+                      redis|hybrid)
+                        DOCKER_PROFILE_VALUE="redis"
+                        ;;
+                      *)
+                        DOCKER_PROFILE_VALUE="postgres"
+                        ;;
+                    esac
                     
                     ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
                       set -e
                       cd /opt/gdpr-backend
                       
                       echo "=== Starting DEV deployment ==="
-                      echo "Queue type: ${QUEUE_TYPE}"
-                      echo "Docker profile: ${DOCKER_PROFILE:-none}"
+                      echo "Queue type: ${QUEUE_TYPE_VALUE}"
+                      echo "Docker profile: ${DOCKER_PROFILE_VALUE:-none}"
                       
-                      # Create DEV env file from Azure DevOps secrets
                       printf '%s\n' \
                         "POSTGRES_USER=$(POSTGRES_USER)" \
                         "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
@@ -286,7 +294,17 @@ stages:
                         "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
                         "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
                         "NODE_ENV=development" \
-                        "QUEUE_TYPE=${QUEUE_TYPE}" \
+                        "QUEUE_TYPE=${QUEUE_TYPE_VALUE}" \
+                        "REDIS_URL=$(REDIS_URL)" \
+                        "WORKER_URL=$(WORKER_URL)" \
+                        "WORKER_AUTH_TOKEN=$(WORKER_AUTH_TOKEN)" \
+                        "WORKER_ENABLED=$(WORKER_ENABLED)" \
+                        "WORKER_CONCURRENCY=$(WORKER_CONCURRENCY)" \
+                        "WORKER_FALLBACK_ENABLED=$(WORKER_FALLBACK_ENABLED)" \
+                        "OVERFLOW_ENABLED=$(OVERFLOW_ENABLED)" \
+                        "OVERFLOW_QUEUE_THRESHOLD=$(OVERFLOW_QUEUE_THRESHOLD)" \
+                        "OVERFLOW_WAIT_THRESHOLD_SEC=$(OVERFLOW_WAIT_THRESHOLD_SEC)" \
+                        "OVERFLOW_CHECK_INTERVAL_MS=$(OVERFLOW_CHECK_INTERVAL_MS)" \
                         > .env.devprod
 
                       # Clean up orphan containers and volumes
@@ -320,8 +338,8 @@ stages:
                       docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis rm -f redis-dev || true
                       
                       # Build and start with selected profile (redis profile adds redis-dev container)
-                      echo "Starting DEV with profile: ${DOCKER_PROFILE}"
-                      if [ "${DOCKER_PROFILE}" = "redis" ]; then
+                      echo "Starting DEV with profile: ${DOCKER_PROFILE_VALUE}"
+                      if [ "${DOCKER_PROFILE_VALUE}" = "redis" ]; then
                         docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis build --no-cache --pull
                         docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis up -d
                       else
@@ -395,18 +413,28 @@ stages:
                   displayName: 'Copy files to server'
 
                 - script: |
-                    QUEUE_TYPE="$(queueType)"
-                    DOCKER_PROFILE="$(dockerProfile)"
+                    QUEUE_TYPE_VALUE="$(QUEUE_TYPE)"
+                    if [ -z "${QUEUE_TYPE_VALUE}" ] || [ "${QUEUE_TYPE_VALUE}" = '$(QUEUE_TYPE)' ]; then
+                      QUEUE_TYPE_VALUE="$(defaultQueueType)"
+                    fi
+
+                    case "${QUEUE_TYPE_VALUE}" in
+                      redis|hybrid)
+                        DOCKER_PROFILE_VALUE="redis"
+                        ;;
+                      *)
+                        DOCKER_PROFILE_VALUE="postgres"
+                        ;;
+                    esac
                     
                     ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
                       set -e
                       cd /opt/gdpr-backend
                       
                       echo "=== Starting PROD deployment ==="
-                      echo "Queue type: ${QUEUE_TYPE}"
-                      echo "Docker profile: ${DOCKER_PROFILE:-none}"
+                      echo "Queue type: ${QUEUE_TYPE_VALUE}"
+                      echo "Docker profile: ${DOCKER_PROFILE_VALUE:-none}"
                       
-                      # Create PROD env file from Azure DevOps secrets
                       printf '%s\n' \
                         "POSTGRES_USER=$(POSTGRES_USER)" \
                         "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
@@ -415,7 +443,17 @@ stages:
                         "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
                         "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
                         "NODE_ENV=production" \
-                        "QUEUE_TYPE=${QUEUE_TYPE}" \
+                        "QUEUE_TYPE=${QUEUE_TYPE_VALUE}" \
+                        "REDIS_URL=$(REDIS_URL)" \
+                        "WORKER_URL=$(WORKER_URL)" \
+                        "WORKER_AUTH_TOKEN=$(WORKER_AUTH_TOKEN)" \
+                        "WORKER_ENABLED=$(WORKER_ENABLED)" \
+                        "WORKER_CONCURRENCY=$(WORKER_CONCURRENCY)" \
+                        "WORKER_FALLBACK_ENABLED=$(WORKER_FALLBACK_ENABLED)" \
+                        "OVERFLOW_ENABLED=$(OVERFLOW_ENABLED)" \
+                        "OVERFLOW_QUEUE_THRESHOLD=$(OVERFLOW_QUEUE_THRESHOLD)" \
+                        "OVERFLOW_WAIT_THRESHOLD_SEC=$(OVERFLOW_WAIT_THRESHOLD_SEC)" \
+                        "OVERFLOW_CHECK_INTERVAL_MS=$(OVERFLOW_CHECK_INTERVAL_MS)" \
                         > .env.production
                       
                       # Stop API containers (both postgres and redis variants)
@@ -425,9 +463,9 @@ stages:
                       docker-compose --env-file .env.production --profile redis rm -f api-redis || true
                       
                       # Build and start with selected profile
-                      echo "Starting with profile: ${DOCKER_PROFILE}"
-                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} build --no-cache --pull
-                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE} up -d
+                      echo "Starting with profile: ${DOCKER_PROFILE_VALUE}"
+                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE_VALUE} build --no-cache --pull
+                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE_VALUE} up -d
                       
                       # Wait for health check
                       for i in {1..30}; do
@@ -453,22 +491,27 @@ stages:
                   displayName: 'Cleanup old images'
                   condition: succeeded()
 
-  # ============================================
-  # Stage 4: Deploy Cloud Run Worker (after PROD) - DISABLED
-  # ============================================
-  # - stage: DeployCloudRunWorker
-  #   displayName: 'Deploy Cloud Run Worker'
-  #   dependsOn: DeployProd
-  #   condition: succeeded()
-  #   variables:
-  #     - group: gdpr-secrets-prod
-  #     - name: GCP_PROJECT_ID
-  #       value: 'gdpr-scanner-worker'
-  #     - name: GCP_REGION
-  #       value: 'europe-west1'
-  #     - name: CLOUD_RUN_SERVICE
-  #       value: 'gdpr-scanner-worker'
-  #   jobs:
+  - stage: DeployCloudRunWorker
+    displayName: 'Deploy Cloud Run Worker'
+    dependsOn: DeployProd
+    condition: >
+      and(
+        succeeded(),
+        or(
+          eq(variables['WORKER_DEPLOY_ENABLED'], 'true'),
+          eq(variables['defaultWorkerDeployEnabled'], 'true')
+        )
+      )
+    variables:
+      - group: gdpr-secrets-prod
+      - group: vultr-deployment
+      - name: GCP_PROJECT_ID
+        value: 'gdpr-scanner-worker'
+      - name: GCP_REGION
+        value: 'europe-west1'
+      - name: CLOUD_RUN_SERVICE
+        value: 'gdpr-scanner-worker'
+    jobs:
       - deployment: DeployWorker
         displayName: 'Deploy to Google Cloud Run'
         pool:
@@ -500,26 +543,23 @@ stages:
                   displayName: 'Authenticate with GCP'
 
                 - script: |
-                    # Build DATABASE_URL from secrets
                     DATABASE_URL="postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@45.63.119.28:5432/$(POSTGRES_DB)?schema=public"
                     
-                    # Deploy to Cloud Run
                     gcloud run deploy $(CLOUD_RUN_SERVICE) \
                       --source . \
                       --region=$(GCP_REGION) \
                       --platform=managed \
-                      --allow-unauthenticated \
-                      --set-env-vars="DATABASE_URL=${DATABASE_URL}" \
-                      --max-instances=3 \
+                      --no-allow-unauthenticated \
+                      --set-env-vars="DATABASE_URL=${DATABASE_URL},WORKER_AUTH_TOKEN=$(WORKER_AUTH_TOKEN),NODE_ENV=production" \
+                      --max-instances=5 \
                       --min-instances=0 \
-                      --memory=512Mi \
+                      --memory=2Gi \
                       --cpu=1 \
                       --timeout=300s \
                       --concurrency=1
                   displayName: 'Deploy to Cloud Run'
 
                 - script: |
-                    # Test the deployment
                     SERVICE_URL=$(gcloud run services describe $(CLOUD_RUN_SERVICE) \
                       --region=$(GCP_REGION) \
                       --format='value(status.url)')
