@@ -431,7 +431,7 @@ stages:
                       
                       # Wait for health check
                       for i in {1..30}; do
-                        if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+                        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
                           echo "Health check passed!"
                           break
                         fi
@@ -439,7 +439,7 @@ stages:
                         sleep 2
                       done
                       
-                      curl -f http://localhost:3000/health || exit 1
+                      curl -f http://localhost:3000/api/health || exit 1
                       
                       docker-compose ps
                       echo "=== PROD Deployment successful! ==="
