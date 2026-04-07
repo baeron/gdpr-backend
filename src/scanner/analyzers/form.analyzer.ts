@@ -256,8 +256,10 @@ export class FormAnalyzer {
           }
         });
 
-        // Check for checkboxes
-        const checkboxes = el.querySelectorAll('input[type="checkbox"]');
+        // Check for checkboxes (including custom role="checkbox" components)
+        const checkboxes = el.querySelectorAll(
+          'input[type="checkbox"], [role="checkbox"]',
+        );
         let hasConsentCheckbox = false;
         let hasPreCheckedMarketing = false;
         let consentText: string | null = null;
@@ -428,9 +430,9 @@ export class FormAnalyzer {
             ) !== null;
           const hasMessageField = container.querySelector('textarea') !== null;
 
-          // Check for checkboxes
+          // Check for checkboxes (including custom role="checkbox" components)
           const checkboxes = container.querySelectorAll(
-            'input[type="checkbox"]',
+            'input[type="checkbox"], [role="checkbox"]',
           );
           let hasConsentCheckbox = false;
           let hasPreCheckedMarketing = false;

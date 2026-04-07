@@ -401,6 +401,31 @@ export class ConsentAnalyzer {
   private async detectGranularConsent(
     page: Page,
   ): Promise<{ hasGranular: boolean; categoryCount: number }> {
+    // Try clicking "Manage Preferences" to open preferences modal first
+    const preferencesSelectors = [
+      'button:has-text("Manage Preferences")',
+      'button:has-text("Manage")',
+      'button:has-text("Customize")',
+      'button:has-text("Preferences")',
+      'button:has-text("Settings")',
+      '[class*="preferences"]',
+      '[class*="settings"]',
+      '[class*="manage"]',
+    ];
+
+    for (const selector of preferencesSelectors) {
+      try {
+        const btn = await page.$(selector);
+        if (btn && (await btn.isVisible())) {
+          await btn.click();
+          await page.waitForTimeout(800);
+          break;
+        }
+      } catch {
+        // Continue
+      }
+    }
+
     // Look for category toggles/checkboxes
     const categorySelectors = [
       '[class*="category"] input[type="checkbox"]',
@@ -409,6 +434,9 @@ export class ConsentAnalyzer {
       '.cookie-category',
       '#onetrust-consent-sdk input[type="checkbox"]',
       '#CybotCookiebotDialog input[type="checkbox"]',
+      // Custom toggle switches (role="switch")
+      '[role="switch"]',
+      '[data-cookie-category]',
     ];
 
     let categoryCount = 0;
@@ -416,8 +444,12 @@ export class ConsentAnalyzer {
     for (const selector of categorySelectors) {
       try {
         const elements = await page.$$(selector);
-        if (elements.length > 0) {
-          categoryCount = Math.max(categoryCount, elements.length);
+        const visibleElements = await Promise.all(
+          elements.map((el) => el.isVisible()),
+        );
+        const visibleCount = visibleElements.filter(Boolean).length;
+        if (visibleCount > 0) {
+          categoryCount = Math.max(categoryCount, visibleCount);
         }
       } catch {
         // Continue
