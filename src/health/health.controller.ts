@@ -7,7 +7,7 @@ import type { HealthStatus, LivenessStatus } from './health.service';
 import { QUEUE_SERVICE } from '../scanner/queue/queue.interface';
 import type { IQueueService } from '../scanner/queue/queue.interface';
 
-@SkipThrottle()
+@SkipThrottle({ short: true, medium: true, long: true })
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
