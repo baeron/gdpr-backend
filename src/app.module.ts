@@ -13,6 +13,7 @@ import { PaymentModule } from './payment/payment.module';
 import { HealthModule } from './health/health.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PricingModule } from './pricing/pricing.module';
+import { TurnstileModule } from './common/turnstile/turnstile.module';
 
 // Conditional Redis import - only when needed
 const queueType = process.env.QUEUE_TYPE || 'postgres';
@@ -37,6 +38,7 @@ const conditionalImports = needsRedis
       envFilePath: '.env',
     }),
     ...conditionalImports,
+    TurnstileModule,
     PrismaModule,
     EmailModule,
     AuditModule,

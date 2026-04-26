@@ -23,4 +23,13 @@ export class CreateAuditDto {
   @IsString()
   @IsOptional()
   locale?: string;
+
+  /**
+   * Cloudflare Turnstile token issued to the browser by the widget.
+   * Consumed by TurnstileGuard, verified against siteverify, then stripped
+   * from the body before reaching this DTO in the controller.
+   */
+  @IsString()
+  @IsOptional()
+  turnstileToken?: string;
 }

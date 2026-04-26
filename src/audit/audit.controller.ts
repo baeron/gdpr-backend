@@ -7,10 +7,12 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { CreateAuditDto } from './dto/create-audit.dto';
 import { AuditResponseDto } from './dto/audit-response.dto';
+import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
 
 @Controller('audit')
 export class AuditController {
@@ -18,6 +20,7 @@ export class AuditController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
+  @UseGuards(TurnstileGuard)
   async createAudit(@Body() dto: CreateAuditDto): Promise<AuditResponseDto> {
     if (!dto.agreeScan) {
       throw new BadRequestException(

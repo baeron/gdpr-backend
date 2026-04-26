@@ -11,7 +11,9 @@ import {
   Inject,
   BadRequestException,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
 import type { Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import {
@@ -62,6 +64,15 @@ export class ScanRequestDto {
   @IsOptional()
   @IsString()
   auditRequestId?: string;
+
+  @ApiProperty({
+    description:
+      'Cloudflare Turnstile token (verified server-side via siteverify)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  turnstileToken?: string;
 }
 
 export class UpdateIssueStatusDto {
@@ -115,6 +126,15 @@ export class QueueScanRequestDto {
   @IsOptional()
   @IsString()
   locale?: string;
+
+  @ApiProperty({
+    description:
+      'Cloudflare Turnstile token (verified server-side via siteverify)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  turnstileToken?: string;
 }
 
 @ApiTags('scanner')
@@ -130,6 +150,7 @@ export class ScannerController {
   ) {}
 
   @Throttle({ short: { ttl: 60000, limit: 3 }, medium: { ttl: 3600000, limit: 20 } })
+  @UseGuards(TurnstileGuard)
   @Post('scan')
   @ApiOperation({
     summary: 'Scan website for GDPR compliance',
@@ -300,6 +321,7 @@ Performs a comprehensive GDPR compliance scan on the specified website.
   // ============ ASYNC QUEUE ENDPOINTS ============
 
   @Throttle({ short: { ttl: 60000, limit: 5 }, medium: { ttl: 3600000, limit: 30 } })
+  @UseGuards(TurnstileGuard)
   @Post('queue')
   @ApiOperation({
     summary: 'Queue a scan (async, recommended)',

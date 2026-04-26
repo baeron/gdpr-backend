@@ -10,6 +10,12 @@ dist
 .env.local
 .env.*.local
 
+# Service account credentials (NEVER commit!)
+gcp-service-account.json
+*-service-account.json
+*.pem
+*.key
+
 # IDE
 .idea
 .vscode
