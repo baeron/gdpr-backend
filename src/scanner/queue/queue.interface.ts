@@ -43,6 +43,10 @@ export interface IQueueService {
   // Cancel job (only if queued)
   cancelJob(jobId: string): Promise<boolean>;
 
+  // Manually re-queue a FAILED job (DLQ replay). Returns false if the job
+  // is missing or not in a FAILED state.
+  retryJob(jobId: string): Promise<boolean>;
+
   // Get queue statistics
   getStats(): Promise<QueueStats>;
 

@@ -236,6 +236,45 @@ describe('PostgresQueueService', () => {
     });
   });
 
+  describe('retryJob (DLQ replay)', () => {
+    it('returns false when the job is not in FAILED state', async () => {
+      (prismaService as any).scanJob.findUnique.mockResolvedValue({
+        ...mockJob,
+        status: 'COMPLETED',
+      });
+
+      const result = await service.retryJob('job-123');
+
+      expect(result).toBe(false);
+      expect((prismaService as any).scanJob.update).not.toHaveBeenCalled();
+    });
+
+    it('resets attempts and re-queues a FAILED job', async () => {
+      (prismaService as any).scanJob.findUnique.mockResolvedValue({
+        ...mockJob,
+        status: 'FAILED',
+        attempts: 3,
+        error: 'boom',
+      });
+      (prismaService as any).scanJob.update.mockResolvedValue({});
+      (prismaService as any).scanJob.count.mockResolvedValue(0);
+      (prismaService as any).scanJob.findFirst.mockResolvedValue(null);
+
+      const result = await service.retryJob('job-123');
+
+      expect(result).toBe(true);
+      expect((prismaService as any).scanJob.update).toHaveBeenCalledWith({
+        where: { id: 'job-123' },
+        data: expect.objectContaining({
+          status: 'QUEUED',
+          attempts: 0,
+          error: null,
+          nextRetryAt: null,
+        }),
+      });
+    });
+  });
+
   describe('getStats', () => {
     it('should return queue statistics', async () => {
       (prismaService as any).scanJob.count

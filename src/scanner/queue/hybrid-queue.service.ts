@@ -226,6 +226,43 @@ export class HybridQueueService implements IQueueService {
     return true;
   }
 
+  async retryJob(jobId: string): Promise<boolean> {
+    // Manual DLQ replay: reset retry counters and re-add to BullMQ.
+    // The local worker will pick it up; if backlog is high the overflow
+    // monitor may forward to Cloud Run on the next tick — that path is
+    // already idempotent (status=QUEUED check before processing).
+    const job = await (this.prisma as any).scanJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job || job.status !== 'FAILED') {
+      return false;
+    }
+
+    await (this.prisma as any).scanJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'QUEUED',
+        attempts: 0,
+        error: null,
+        currentStep: 'Re-queued by operator',
+        progress: 0,
+        startedAt: null,
+        completedAt: null,
+        nextRetryAt: null,
+      },
+    });
+
+    await this.queue.add(
+      'scan',
+      { jobId, websiteUrl: job.websiteUrl },
+      { priority: -(job.priority || 0), jobId },
+    );
+
+    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
+    return true;
+  }
+
   async getStats(): Promise<QueueStats> {
     const [queued, processing, completed, failed] = await Promise.all([
       (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),

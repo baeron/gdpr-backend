@@ -68,6 +68,7 @@ describe('ScannerController', () => {
       addJob: jest.fn().mockResolvedValue({ id: 'job-1', status: 'QUEUED', position: 1 }),
       getJobStatus: jest.fn().mockResolvedValue({ id: 'job-1', status: 'PROCESSING', progress: 50 }),
       cancelJob: jest.fn().mockResolvedValue(true),
+      retryJob: jest.fn().mockResolvedValue(true),
       getStats: jest.fn().mockResolvedValue({ queued: 2, processing: 1, completed: 10, failed: 0 }),
     };
     mockUrlUtils = {
@@ -167,6 +168,20 @@ describe('ScannerController', () => {
       const result = await controller.cancelJob('job-1');
       expect(mockQueueService.cancelJob).toHaveBeenCalledWith('job-1');
       expect(result).toEqual({ cancelled: true });
+    });
+  });
+
+  describe('retryJob', () => {
+    it('replays a FAILED job from the DLQ', async () => {
+      const result = await controller.retryJob('job-1');
+      expect(mockQueueService.retryJob).toHaveBeenCalledWith('job-1');
+      expect(result).toEqual({ retried: true });
+    });
+
+    it('returns retried=false when the job is not in FAILED state', async () => {
+      mockQueueService.retryJob = jest.fn().mockResolvedValue(false);
+      const result = await controller.retryJob('not-failed');
+      expect(result).toEqual({ retried: false });
     });
   });
 

@@ -12,6 +12,16 @@ import {
 const MAX_CONCURRENT_SCANS = 1;
 const POLL_INTERVAL = 5000;
 
+/**
+ * Exponential backoff delay (ms) before the Nth retry.
+ * attempts=1 → 30s, 2 → 1m, 3 → 2m, capped at 5m.
+ */
+function computeBackoffMs(attempts: number): number {
+  const base = 30_000;
+  const cap = 5 * 60_000;
+  return Math.min(base * Math.pow(2, Math.max(0, attempts - 1)), cap);
+}
+
 @Injectable()
 export class PostgresQueueService implements IQueueService {
   private readonly logger = new Logger(PostgresQueueService.name);
@@ -105,6 +115,37 @@ export class PostgresQueueService implements IQueueService {
     return true;
   }
 
+  async retryJob(jobId: string): Promise<boolean> {
+    // Manual DLQ replay: only FAILED jobs can be retried. Reset
+    // attempts so the worker gets a full retry budget again, clear
+    // stale per-attempt state, and put the job back in QUEUED.
+    const job = await (this.prisma as any).scanJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job || job.status !== 'FAILED') {
+      return false;
+    }
+
+    await (this.prisma as any).scanJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'QUEUED',
+        attempts: 0,
+        error: null,
+        currentStep: 'Re-queued by operator',
+        progress: 0,
+        startedAt: null,
+        completedAt: null,
+        nextRetryAt: null,
+      },
+    });
+
+    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
+    setImmediate(() => this.processNextJob());
+    return true;
+  }
+
   async getStats(): Promise<QueueStats> {
     const [queued, processing, completed, failed] = await Promise.all([
       (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
@@ -155,8 +196,17 @@ export class PostgresQueueService implements IQueueService {
 
     if (processingCount >= MAX_CONCURRENT_SCANS) return;
 
+    // A QUEUED job is eligible only if its nextRetryAt is null (fresh)
+    // or already in the past — otherwise the backoff window for a
+    // previously-failed attempt is still active.
     const nextJob = await (this.prisma as any).scanJob.findFirst({
-      where: { status: 'QUEUED' },
+      where: {
+        status: 'QUEUED',
+        OR: [
+          { nextRetryAt: null },
+          { nextRetryAt: { lte: new Date() } },
+        ],
+      },
       orderBy: [{ priority: 'desc' }, { queuedAt: 'asc' }],
     });
 
@@ -174,7 +224,10 @@ export class PostgresQueueService implements IQueueService {
   }
 
   private async executeJob(job: any) {
-    this.logger.log(`Starting job ${job.id} for ${job.websiteUrl}`);
+    const attempts = (job.attempts ?? 0) + 1;
+    this.logger.log(
+      `Starting job ${job.id} for ${job.websiteUrl} (attempt ${attempts}/${job.maxAttempts ?? 3})`,
+    );
 
     await (this.prisma as any).scanJob.update({
       where: { id: job.id },
@@ -183,6 +236,8 @@ export class PostgresQueueService implements IQueueService {
         startedAt: new Date(),
         currentStep: 'Initializing browser...',
         progress: 5,
+        attempts,
+        nextRetryAt: null,
       },
     });
 
@@ -209,17 +264,45 @@ export class PostgresQueueService implements IQueueService {
 
       this.logger.log(`Job ${job.id} completed. Report: ${reportId}`);
     } catch (error) {
-      this.logger.error(`Job ${job.id} failed: ${error.message}`);
+      const errMessage = (error as Error).message ?? String(error);
+      const maxAttempts = job.maxAttempts ?? 3;
 
-      await (this.prisma as any).scanJob.update({
-        where: { id: job.id },
-        data: {
-          status: 'FAILED',
-          completedAt: new Date(),
-          error: error.message,
-          currentStep: 'Failed',
-        },
-      });
+      if (attempts < maxAttempts) {
+        // Re-queue for a later retry with exponential backoff. Status
+        // returns to QUEUED so the worker's polling loop will pick it
+        // up again — but only after nextRetryAt has elapsed.
+        const backoffMs = computeBackoffMs(attempts);
+        const nextRetryAt = new Date(Date.now() + backoffMs);
+        this.logger.warn(
+          `Job ${job.id} attempt ${attempts}/${maxAttempts} failed: ${errMessage}. ` +
+            `Re-queued for ${nextRetryAt.toISOString()} (in ${Math.round(backoffMs / 1000)}s).`,
+        );
+        await (this.prisma as any).scanJob.update({
+          where: { id: job.id },
+          data: {
+            status: 'QUEUED',
+            error: errMessage,
+            currentStep: `Retry scheduled (${attempts}/${maxAttempts})`,
+            nextRetryAt,
+            startedAt: null,
+          },
+        });
+      } else {
+        // Exhausted retries — terminal failure (DLQ entry).
+        this.logger.error(
+          `Job ${job.id} permanently failed after ${attempts} attempts: ${errMessage}`,
+        );
+        await (this.prisma as any).scanJob.update({
+          where: { id: job.id },
+          data: {
+            status: 'FAILED',
+            completedAt: new Date(),
+            error: errMessage,
+            currentStep: 'Failed',
+            nextRetryAt: null,
+          },
+        });
+      }
     }
   }
 

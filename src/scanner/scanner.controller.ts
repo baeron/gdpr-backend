@@ -419,6 +419,30 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
     return { cancelled };
   }
 
+  @Post('job/:id/retry')
+  @ApiOperation({
+    summary: 'Retry a permanently failed scan (DLQ replay)',
+    description: `
+Manually re-queues a job that has reached terminal FAILED status after
+exhausting its automatic retry budget. Resets the attempt counter so
+the worker gets a full retry budget again.
+
+Returns \`{ retried: false }\` if the job is missing or not in FAILED
+state (idempotent — safe to call repeatedly).
+    `,
+  })
+  @ApiResponse({ status: 201, description: 'Job re-queued from FAILED' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Job not eligible for retry (not found or not in FAILED state)',
+  })
+  async retryJob(@Param('id') id: string) {
+    this.logger.log(`Retrying job from DLQ: ${id}`);
+    const retried = await this.queueService.retryJob(id);
+    return { retried };
+  }
+
   @SkipThrottle()
   @Get('queue/stats')
   @ApiOperation({

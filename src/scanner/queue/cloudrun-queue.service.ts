@@ -119,6 +119,37 @@ export class CloudRunQueueService implements IQueueService {
     return true;
   }
 
+  async retryJob(jobId: string): Promise<boolean> {
+    // Manual DLQ replay: reset DB-side counters and re-trigger the
+    // Cloud Run worker. Trigger failure is non-fatal because the
+    // fallback polling loop also picks up stale QUEUED jobs.
+    const job = await (this.prisma as any).scanJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job || job.status !== 'FAILED') {
+      return false;
+    }
+
+    await (this.prisma as any).scanJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'QUEUED',
+        attempts: 0,
+        error: null,
+        currentStep: 'Re-queued by operator',
+        progress: 0,
+        startedAt: null,
+        completedAt: null,
+        nextRetryAt: null,
+      },
+    });
+
+    await this.triggerWorker(jobId);
+    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
+    return true;
+  }
+
   async getStats(): Promise<QueueStats> {
     const [queued, processing, completed, failed] = await Promise.all([
       (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),

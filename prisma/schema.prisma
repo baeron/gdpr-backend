@@ -143,7 +143,12 @@ model ScanJob {
   // Results
   reportId        String?   // Link to AuditReport when completed
   error           String?   // Error message if failed
-  
+
+  // Retry / DLQ tracking
+  attempts        Int       @default(0)  // Times the worker has tried this job
+  maxAttempts     Int       @default(3)  // Hard cap; FAILED is permanent past this
+  nextRetryAt     DateTime?               // Earliest time the worker may pick this job up
+
   // Timing
   queuedAt        DateTime  @default(now())
   startedAt       DateTime?
@@ -160,6 +165,7 @@ model ScanJob {
   @@index([status])
   @@index([queuedAt])
   @@index([priority, queuedAt])
+  @@index([status, nextRetryAt])
 }
 
 enum ScanJobStatus {
