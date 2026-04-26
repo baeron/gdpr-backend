@@ -129,7 +129,7 @@ export class RedisQueueService extends BaseQueueService {
     const { jobId, websiteUrl } = bullJob.data;
     this.logger.log(`Processing job ${jobId} for ${websiteUrl}`);
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: {
         status: 'PROCESSING',
@@ -150,7 +150,7 @@ export class RedisQueueService extends BaseQueueService {
 
       const reportId = await this.reportService.saveScanResult(result);
 
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: jobId },
         data: {
           status: 'COMPLETED',
@@ -166,7 +166,7 @@ export class RedisQueueService extends BaseQueueService {
       const errMessage = (error as Error).message ?? String(error);
       this.logger.error(`Job ${jobId} failed: ${errMessage}`);
 
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: jobId },
         data: {
           status: 'FAILED',

@@ -96,8 +96,12 @@ export class ScannerReportService {
 
     const prismaRiskLevel = this.mapRiskLevel(scanResult.overallRiskLevel);
 
-    // Create the audit report with issues
-    // Using 'as any' to bypass Prisma client cache issues in IDE
+    // Create the audit report with issues.
+    // The `as any` here intentionally side-steps Prisma's strict
+    // InputJsonValue typing: cookies/trackers/forms/etc. are typed
+    // domain objects (CookieInfo[], FormInfo[], …), but Prisma's Json
+    // columns demand types with an index signature. The runtime data
+    // is JSON-serialisable; the cast is purely a TS-level escape.
     const report = await (this.prisma.auditReport as any).create({
       data: {
         auditRequestId: auditRequestId ?? undefined,
@@ -142,7 +146,7 @@ export class ScannerReportService {
   }
 
   async getReport(reportId: string) {
-    return (this.prisma.auditReport as any).findUnique({
+    return this.prisma.auditReport.findUnique({
       where: { id: reportId },
       include: {
         issues: {
@@ -154,7 +158,7 @@ export class ScannerReportService {
   }
 
   async getReportByAuditRequest(auditRequestId: string) {
-    return (this.prisma.auditReport as any).findUnique({
+    return this.prisma.auditReport.findUnique({
       where: { auditRequestId },
       include: {
         issues: {
@@ -165,7 +169,7 @@ export class ScannerReportService {
   }
 
   async getReportsByWebsite(websiteUrl: string, limit = 10) {
-    return (this.prisma.auditReport as any).findMany({
+    return this.prisma.auditReport.findMany({
       where: { websiteUrl: { contains: websiteUrl } },
       orderBy: { scannedAt: 'desc' },
       take: limit,
@@ -179,7 +183,7 @@ export class ScannerReportService {
     issueId: string,
     status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'WONT_FIX',
   ) {
-    return (this.prisma as any).scanIssue.update({
+    return this.prisma.scanIssue.update({
       where: { id: issueId },
       data: {
         status,

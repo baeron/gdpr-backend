@@ -72,7 +72,7 @@ export class IdempotencyService {
     | { hit: true; conflict: true }
     | { hit: true; conflict: false; response: CachedResponse }
   > {
-    const record = await (this.prisma as any).idempotencyRecord.findUnique({
+    const record = await this.prisma.idempotencyRecord.findUnique({
       where: { key_endpoint: { key, endpoint } },
     });
 
@@ -112,7 +112,7 @@ export class IdempotencyService {
   ): Promise<void> {
     const expiresAt = new Date(Date.now() + TTL_MS);
 
-    await (this.prisma as any).idempotencyRecord.upsert({
+    await this.prisma.idempotencyRecord.upsert({
       where: { key_endpoint: { key, endpoint } },
       create: {
         key,
@@ -136,7 +136,7 @@ export class IdempotencyService {
    * call on demand (e.g. tests).
    */
   async cleanupExpired(): Promise<number> {
-    const result = await (this.prisma as any).idempotencyRecord.deleteMany({
+    const result = await this.prisma.idempotencyRecord.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
     if (result.count > 0) {

@@ -69,7 +69,7 @@ export class PostgresQueueService extends BaseQueueService {
   private async processNextJob() {
     if (this.isProcessing) return;
 
-    const processingCount = await (this.prisma as any).scanJob.count({
+    const processingCount = await this.prisma.scanJob.count({
       where: { status: 'PROCESSING' },
     });
 
@@ -78,7 +78,7 @@ export class PostgresQueueService extends BaseQueueService {
     // A QUEUED job is eligible only if its nextRetryAt is null (fresh)
     // or already in the past — otherwise the backoff window for a
     // previously-failed attempt is still active.
-    const nextJob = await (this.prisma as any).scanJob.findFirst({
+    const nextJob = await this.prisma.scanJob.findFirst({
       where: {
         status: 'QUEUED',
         OR: [
@@ -110,7 +110,7 @@ export class PostgresQueueService extends BaseQueueService {
       `Starting job ${job.id} for ${job.websiteUrl} (attempt ${attempts}/${job.maxAttempts ?? 3})`,
     );
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: job.id },
       data: {
         status: 'PROCESSING',
@@ -132,7 +132,7 @@ export class PostgresQueueService extends BaseQueueService {
         job.auditRequestId,
       );
 
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: job.id },
         data: {
           status: 'COMPLETED',
@@ -156,7 +156,7 @@ export class PostgresQueueService extends BaseQueueService {
           `Job ${job.id} attempt ${attempts}/${maxAttempts} failed: ${errMessage}. ` +
             `Re-queued for ${nextRetryAt.toISOString()} (in ${Math.round(backoffMs / 1000)}s).`,
         );
-        await (this.prisma as any).scanJob.update({
+        await this.prisma.scanJob.update({
           where: { id: job.id },
           data: {
             status: 'QUEUED',
@@ -171,7 +171,7 @@ export class PostgresQueueService extends BaseQueueService {
         this.logger.error(
           `Job ${job.id} permanently failed after ${attempts} attempts: ${errMessage}`,
         );
-        await (this.prisma as any).scanJob.update({
+        await this.prisma.scanJob.update({
           where: { id: job.id },
           data: {
             status: 'FAILED',

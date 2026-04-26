@@ -207,7 +207,7 @@ export class HybridQueueService extends BaseQueueService {
    *   2. Oldest waiting job exceeds wait time threshold
    */
   private async shouldTriggerOverflow(): Promise<boolean> {
-    const queuedCount = await (this.prisma as any).scanJob.count({
+    const queuedCount = await this.prisma.scanJob.count({
       where: { status: 'QUEUED' },
     });
 
@@ -218,7 +218,7 @@ export class HybridQueueService extends BaseQueueService {
       return true;
     }
 
-    const oldestJob = await (this.prisma as any).scanJob.findFirst({
+    const oldestJob = await this.prisma.scanJob.findFirst({
       where: { status: 'QUEUED' },
       orderBy: { queuedAt: 'asc' },
       select: { queuedAt: true },
@@ -255,7 +255,7 @@ export class HybridQueueService extends BaseQueueService {
         return;
       }
 
-      const overflowJobs = await (this.prisma as any).scanJob.findMany({
+      const overflowJobs = await this.prisma.scanJob.findMany({
         where: { status: 'QUEUED' },
         orderBy: [{ priority: 'desc' }, { queuedAt: 'asc' }],
         take: 3, // Send up to 3 at a time to avoid thundering herd
@@ -336,7 +336,7 @@ export class HybridQueueService extends BaseQueueService {
     const { jobId, websiteUrl } = bullJob.data;
 
     // Check if Cloud Run already picked this up
-    const currentJob = await (this.prisma as any).scanJob.findUnique({
+    const currentJob = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
 
@@ -349,7 +349,7 @@ export class HybridQueueService extends BaseQueueService {
 
     this.logger.log(`[Local] Processing job ${jobId} for ${websiteUrl}`);
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: {
         status: 'PROCESSING',
@@ -370,7 +370,7 @@ export class HybridQueueService extends BaseQueueService {
 
       const reportId = await this.reportService.saveScanResult(result);
 
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: jobId },
         data: {
           status: 'COMPLETED',
@@ -386,7 +386,7 @@ export class HybridQueueService extends BaseQueueService {
       const errMessage = (error as Error).message ?? String(error);
       this.logger.error(`[Local] Job ${jobId} failed: ${errMessage}`);
 
-      await (this.prisma as any).scanJob.update({
+      await this.prisma.scanJob.update({
         where: { id: jobId },
         data: {
           status: 'FAILED',

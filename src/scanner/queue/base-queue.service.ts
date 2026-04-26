@@ -98,7 +98,7 @@ export abstract class BaseQueueService implements IQueueService {
 
     await this.assertWithinClientRateLimit(job.clientIp);
 
-    const created = await (this.prisma as any).scanJob.create({
+    const created = await this.prisma.scanJob.create({
       data: {
         websiteUrl: job.websiteUrl,
         auditRequestId: job.auditRequestId,
@@ -118,7 +118,7 @@ export abstract class BaseQueueService implements IQueueService {
   }
 
   async getJobStatus(jobId: string): Promise<JobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
     if (!job) return null;
@@ -129,14 +129,14 @@ export abstract class BaseQueueService implements IQueueService {
   }
 
   async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
     if (!job || job.status !== 'QUEUED') return false;
 
     await this.cancelOnTransport(jobId);
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: { status: 'CANCELLED' },
     });
@@ -149,12 +149,12 @@ export abstract class BaseQueueService implements IQueueService {
     // attempt counter so the worker has a fresh retry budget, clear
     // any per-attempt state, and put the job back in QUEUED before
     // pushing it onto the transport.
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
     if (!job || job.status !== 'FAILED') return false;
 
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: {
         status: 'QUEUED',
@@ -180,10 +180,10 @@ export abstract class BaseQueueService implements IQueueService {
 
   async getStats(): Promise<QueueStats> {
     const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
+      this.prisma.scanJob.count({ where: { status: 'QUEUED' } }),
+      this.prisma.scanJob.count({ where: { status: 'PROCESSING' } }),
+      this.prisma.scanJob.count({ where: { status: 'COMPLETED' } }),
+      this.prisma.scanJob.count({ where: { status: 'FAILED' } }),
     ]);
 
     return {
@@ -206,7 +206,7 @@ export abstract class BaseQueueService implements IQueueService {
   ): Promise<void> {
     if (!clientIp) return;
 
-    const activeJobsCount = await (this.prisma as any).scanJob.count({
+    const activeJobsCount = await this.prisma.scanJob.count({
       where: {
         clientIp,
         status: { in: ['QUEUED', 'PROCESSING'] },
@@ -222,12 +222,12 @@ export abstract class BaseQueueService implements IQueueService {
   }
 
   protected async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
+    const job = await this.prisma.scanJob.findUnique({
       where: { id: jobId },
     });
     if (!job || job.status !== 'QUEUED') return 0;
 
-    const ahead = await (this.prisma as any).scanJob.count({
+    const ahead = await this.prisma.scanJob.count({
       where: {
         status: 'QUEUED',
         OR: [
@@ -248,7 +248,7 @@ export abstract class BaseQueueService implements IQueueService {
     progress: number,
     step: string,
   ): Promise<void> {
-    await (this.prisma as any).scanJob.update({
+    await this.prisma.scanJob.update({
       where: { id: jobId },
       data: { progress, currentStep: step },
     });

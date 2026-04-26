@@ -121,7 +121,7 @@ export class CloudRunQueueService extends BaseQueueService {
     try {
       const staleThreshold = new Date(Date.now() - STALE_JOB_THRESHOLD_MS);
 
-      const staleJobs = await (this.prisma as any).scanJob.findMany({
+      const staleJobs = await this.prisma.scanJob.findMany({
         where: {
           status: 'QUEUED',
           queuedAt: { lt: staleThreshold },
