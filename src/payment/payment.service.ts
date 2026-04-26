@@ -105,77 +105,110 @@ export class PaymentService {
         : 'OTHER';
     }
 
-    // Reserve slot and get dynamic price
-    const { slotNumber, price } = await this.pricingService.reserveSlot(region);
-
-    this.logger.log(
-      `Creating launch checkout for report ${params.reportId}, ` +
-      `region: ${region}, slot: ${slotNumber}, price: €${price}`,
-    );
-
-    // Pre-generate the LaunchPurchase id so it can be used both as Stripe
-    // metadata (for the webhook) and as Stripe idempotencyKey (so retries
-    // don't create duplicate Stripe sessions if the request is replayed).
-    const launchPurchaseId = randomUUID();
     const ipHash = this.geoService.hashIP(params.clientIp);
 
-    // 1. Create the Stripe session FIRST. Failure here means no DB row is
-    //    created — no orphan PENDING LaunchPurchase to clean up.
-    const session = await this.stripe.checkout.sessions.create(
-      {
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: 'eur',
-              product_data: {
-                name: 'GDPR Detailed Report - Launch Special',
-                description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
+    // Slot allocation can race when the Redis counter is unavailable and
+    // the service falls back to the DB-based reserveSlot path. The DB has
+    // a UNIQUE(region, campaignId, slotNumber) constraint as a backstop,
+    // so a losing race surfaces as a Prisma P2002 error here. Retry up to
+    // a small bound by re-reserving a fresh slot and re-issuing Stripe
+    // with a fresh idempotency key.
+    const MAX_SLOT_RETRIES = 5;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= MAX_SLOT_RETRIES; attempt++) {
+      const { slotNumber, price } =
+        await this.pricingService.reserveSlot(region);
+
+      this.logger.log(
+        `Creating launch checkout for report ${params.reportId}, ` +
+          `region: ${region}, slot: ${slotNumber}, price: €${price} ` +
+          `(attempt ${attempt}/${MAX_SLOT_RETRIES})`,
+      );
+
+      // Each attempt gets its own id so a retry produces a NEW Stripe
+      // session (we cannot reuse the previous idempotency key with
+      // different metadata).
+      const launchPurchaseId = randomUUID();
+
+      // 1. Create the Stripe session FIRST. No orphan DB row on failure.
+      const session = await this.stripe.checkout.sessions.create(
+        {
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'eur',
+                product_data: {
+                  name: 'GDPR Detailed Report - Launch Special',
+                  description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
+                },
+                unit_amount: price * 100, // Convert to cents
               },
-              unit_amount: price * 100, // Convert to cents
+              quantity: 1,
             },
-            quantity: 1,
+          ],
+          mode: 'payment',
+          success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: params.cancelUrl,
+          customer_email: params.userEmail,
+          metadata: {
+            reportId: params.reportId,
+            launchPurchaseId,
+            region,
+            slotNumber: slotNumber.toString(),
+            priceEur: price.toString(),
+            campaignId: 'launch-2026',
           },
-        ],
-        mode: 'payment',
-        success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: params.cancelUrl,
-        customer_email: params.userEmail,
-        metadata: {
-          reportId: params.reportId,
-          launchPurchaseId,
-          region,
-          slotNumber: slotNumber.toString(),
-          priceEur: price.toString(),
-          campaignId: 'launch-2026',
         },
-      },
-      { idempotencyKey: launchPurchaseId },
+        { idempotencyKey: launchPurchaseId },
+      );
+
+      try {
+        // 2. Persist the LaunchPurchase with stripeSessionId already set.
+        await this.pricingService.recordPurchase({
+          id: launchPurchaseId,
+          reportId: params.reportId,
+          region,
+          slotNumber,
+          priceEur: price,
+          country: params.country,
+          city: params.city,
+          ipHash,
+          userEmail: params.userEmail,
+          stripeSessionId: session.id,
+        });
+
+        return {
+          sessionId: session.id,
+          url: session.url!,
+          priceEur: price,
+          region,
+          slotNumber,
+        };
+      } catch (err: unknown) {
+        // P2002 = unique-constraint violation; here it can only mean
+        // another concurrent reservation grabbed the same slot first.
+        // The orphan Stripe session expires automatically and was never
+        // charged (mode=payment, no payment_intent until checkout).
+        const code = (err as { code?: string })?.code;
+        if (code === 'P2002') {
+          this.logger.warn(
+            `Slot ${slotNumber} for region ${region} was taken by a concurrent ` +
+              `reservation; retrying with a fresh slot.`,
+          );
+          lastErr = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Exhausted retries — surface the last race error so the caller can 5xx.
+    throw new Error(
+      `Failed to reserve a launch slot for region ${region} after ` +
+        `${MAX_SLOT_RETRIES} attempts: ${(lastErr as Error)?.message ?? 'unknown'}`,
     );
-
-    // 2. Persist the LaunchPurchase with stripeSessionId already set in a
-    //    single write — no separate create + update sequence to fail
-    //    halfway through.
-    await this.pricingService.recordPurchase({
-      id: launchPurchaseId,
-      reportId: params.reportId,
-      region,
-      slotNumber,
-      priceEur: price,
-      country: params.country,
-      city: params.city,
-      ipHash,
-      userEmail: params.userEmail,
-      stripeSessionId: session.id,
-    });
-
-    return {
-      sessionId: session.id,
-      url: session.url!,
-      priceEur: price,
-      region,
-      slotNumber,
-    };
   }
 
   /**

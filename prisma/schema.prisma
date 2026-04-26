@@ -254,6 +254,10 @@ model LaunchPurchase {
   @@index([stripeSessionId])
   @@index([status])
   @@index([region, slotNumber])
+  // Enforces one purchase per slot inside a (region, campaign).
+  // Backstop against duplicate slot allocation when the Redis counter
+  // is unavailable and the service falls back to a DB-based reserveSlot.
+  @@unique([region, campaignId, slotNumber])
 }
 
 enum PricingRegion {

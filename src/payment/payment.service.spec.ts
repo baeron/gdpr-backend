@@ -115,6 +115,117 @@ describe('PaymentService', () => {
     });
   });
 
+  describe('createLaunchCheckoutSession (slot retry)', () => {
+    /**
+     * The DB has UNIQUE(region, campaignId, slotNumber). When two requests
+     * race past the Redis fallback path and try to claim the same slot,
+     * the loser must transparently re-reserve a fresh slot rather than
+     * 500 to the user.
+     */
+    it('retries on P2002 with a fresh slot and a fresh Stripe session', async () => {
+      let recordCalls = 0;
+      const stripeCreate = jest.fn().mockImplementation(async () => ({
+        id: `cs_${recordCalls + 1}`,
+        url: 'https://stripe.test',
+      }));
+      const reserveSlot = jest
+        .fn()
+        .mockResolvedValueOnce({ slotNumber: 7, price: 7 })
+        .mockResolvedValueOnce({ slotNumber: 8, price: 8 });
+      const recordPurchase = jest.fn().mockImplementation(async () => {
+        recordCalls++;
+        if (recordCalls === 1) {
+          const e: any = new Error('Unique constraint failed');
+          e.code = 'P2002';
+          throw e;
+        }
+        return { id: 'lp-2' };
+      });
+
+      const prisma: any = {
+        launchPurchase: { update: jest.fn() },
+        payment: { create: jest.fn(), update: jest.fn() },
+        $transaction: jest.fn(),
+      };
+      const pricingService: any = {
+        getRegionFromCountry: () => 'EU',
+        reserveSlot,
+        recordPurchase,
+        updatePurchaseStatus: jest.fn(),
+      };
+      const geoService: any = {
+        getGeoFromIP: jest.fn(),
+        hashIP: () => 'hash',
+      };
+
+      const svc = new PaymentService(
+        { get: jest.fn().mockReturnValue('sk_test') } as any,
+        prisma,
+        pricingService,
+        geoService,
+      );
+      // Inject a fake Stripe client
+      (svc as any).stripe = {
+        checkout: { sessions: { create: stripeCreate } },
+      };
+
+      const result = await svc.createLaunchCheckoutSession({
+        reportId: 'r-1',
+        clientIp: '1.2.3.4',
+        country: 'DE',
+        successUrl: 'https://x/s',
+        cancelUrl: 'https://x/c',
+      });
+
+      expect(reserveSlot).toHaveBeenCalledTimes(2);
+      expect(stripeCreate).toHaveBeenCalledTimes(2);
+      expect(recordPurchase).toHaveBeenCalledTimes(2);
+      expect(result.slotNumber).toBe(8);
+      // Each retry must use a *new* idempotencyKey
+      const keys = stripeCreate.mock.calls.map((c) => c[1].idempotencyKey);
+      expect(new Set(keys).size).toBe(2);
+    });
+
+    it('rethrows non-P2002 errors without retrying', async () => {
+      const stripeCreate = jest
+        .fn()
+        .mockResolvedValue({ id: 'cs_1', url: 'https://stripe.test' });
+      const reserveSlot = jest
+        .fn()
+        .mockResolvedValue({ slotNumber: 1, price: 1 });
+      const recordPurchase = jest
+        .fn()
+        .mockRejectedValue(new Error('boom'));
+
+      const svc = new PaymentService(
+        { get: jest.fn().mockReturnValue('sk_test') } as any,
+        { launchPurchase: { update: jest.fn() } } as any,
+        {
+          getRegionFromCountry: () => 'EU',
+          reserveSlot,
+          recordPurchase,
+        } as any,
+        { hashIP: () => 'h', getGeoFromIP: jest.fn() } as any,
+      );
+      (svc as any).stripe = {
+        checkout: { sessions: { create: stripeCreate } },
+      };
+
+      await expect(
+        svc.createLaunchCheckoutSession({
+          reportId: 'r-1',
+          clientIp: '1.2.3.4',
+          country: 'DE',
+          successUrl: 'https://x/s',
+          cancelUrl: 'https://x/c',
+        }),
+      ).rejects.toThrow('boom');
+
+      expect(reserveSlot).toHaveBeenCalledTimes(1);
+      expect(recordPurchase).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('handleCheckoutCompleted (transaction)', () => {
     /**
      * The webhook handler must apply Payment.update + AuditReport.update

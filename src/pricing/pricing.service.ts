@@ -133,33 +133,64 @@ export class PricingService {
   async reserveSlot(region: PricingRegion): Promise<{ slotNumber: number; price: number }> {
     if (!this.redis) {
       this.logger.warn('Redis not available - using database fallback for slot reservation');
-      // Fallback: get max slot from database and increment
-      const maxSlot = await this.prisma.launchPurchase.findFirst({
-        where: {
-          region,
-          campaignId: this.CAMPAIGN_ID,
-        },
-        orderBy: { slotNumber: 'desc' },
-        select: { slotNumber: true },
+
+      // The DB fallback is racy by nature (read max + return without an
+      // INSERT in the same statement). We mitigate two ways:
+      //   1. PostgreSQL transaction-scoped advisory lock on
+      //      (region, campaignId) so concurrent reservations within a
+      //      single instance serialise. Released on tx commit/abort.
+      //   2. A unique index on (region, campaignId, slotNumber) catches
+      //      any race that slips past the lock (e.g. multiple instances
+      //      hitting different DB connections in pathological cases) —
+      //      callers must handle P2002 and retry.
+      return this.prisma.$transaction(async (tx) => {
+        const lockKey = this.advisoryLockKey(region, this.CAMPAIGN_ID);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
+
+        const maxSlot = await tx.launchPurchase.findFirst({
+          where: { region, campaignId: this.CAMPAIGN_ID },
+          orderBy: { slotNumber: 'desc' },
+          select: { slotNumber: true },
+        });
+        const slotNumber = (maxSlot?.slotNumber || 0) + 1;
+        const price = Math.min(slotNumber, this.MAX_PRICE);
+
+        this.logger.log(
+          `Reserved slot ${slotNumber} for region ${region} at €${price} (DB fallback)`,
+        );
+        return { slotNumber, price };
       });
-      const slotNumber = (maxSlot?.slotNumber || 0) + 1;
-      const price = Math.min(slotNumber, this.MAX_PRICE);
-      
-      this.logger.log(`Reserved slot ${slotNumber} for region ${region} at €${price} (DB fallback)`);
-      return { slotNumber, price };
     }
-    
+
     const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
-    
+
     // Atomic increment
     const slotNumber = await this.redis.incr(counterKey);
-    
+
     // Calculate price (slot 1 = €1, slot 2 = €2, etc.)
     const price = Math.min(slotNumber, this.MAX_PRICE);
-    
+
     this.logger.log(`Reserved slot ${slotNumber} for region ${region} at €${price}`);
-    
+
     return { slotNumber, price };
+  }
+
+  /**
+   * Stable 64-bit signed integer derived from a string, suitable for
+   * pg_advisory_xact_lock. Uses FNV-1a 64-bit and clamps to BIGINT range.
+   */
+  private advisoryLockKey(...parts: string[]): bigint {
+    const str = parts.join(':');
+    // FNV-1a 64-bit
+    let hash = 0xcbf29ce484222325n;
+    const prime = 0x100000001b3n;
+    const mask = 0xffffffffffffffffn;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash ^ BigInt(str.charCodeAt(i))) * prime) & mask;
+    }
+    // Map to signed BIGINT range
+    const SIGN_BIT = 1n << 63n;
+    return hash >= SIGN_BIT ? hash - (1n << 64n) : hash;
   }
 
   /**
