@@ -1,6 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import {
+  ValidationPipe,
+  VersioningType,
+  VERSION_NEUTRAL,
+} from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as Sentry from '@sentry/node';
@@ -124,6 +128,18 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
 
   // Global prefix for API
   app.setGlobalPrefix('api');
+
+  // URI versioning with back-compat: every controller is reachable at
+  // BOTH `/api/v1/...` (the new canonical form clients should adopt)
+  // and `/api/...` (the historical form, kept alive via VERSION_NEUTRAL
+  // so the existing frontend keeps working unchanged). When a real v2
+  // breaking change appears, the v1 mount stays frozen and v2 ships
+  // alongside it via @Version('2') on the relevant handlers.
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: ['1', VERSION_NEUTRAL],
+    prefix: 'v',
+  });
 
   // Enable Nest shutdown hooks so SIGTERM / SIGINT propagate to
   // onModuleDestroy in services that own external resources:
