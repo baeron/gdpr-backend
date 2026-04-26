@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -112,9 +113,51 @@ export class PaymentService {
       `region: ${region}, slot: ${slotNumber}, price: €${price}`,
     );
 
-    // Create launch purchase record
+    // Pre-generate the LaunchPurchase id so it can be used both as Stripe
+    // metadata (for the webhook) and as Stripe idempotencyKey (so retries
+    // don't create duplicate Stripe sessions if the request is replayed).
+    const launchPurchaseId = randomUUID();
     const ipHash = this.geoService.hashIP(params.clientIp);
-    const launchPurchase = await this.pricingService.recordPurchase({
+
+    // 1. Create the Stripe session FIRST. Failure here means no DB row is
+    //    created — no orphan PENDING LaunchPurchase to clean up.
+    const session = await this.stripe.checkout.sessions.create(
+      {
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'eur',
+              product_data: {
+                name: 'GDPR Detailed Report - Launch Special',
+                description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
+              },
+              unit_amount: price * 100, // Convert to cents
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: params.cancelUrl,
+        customer_email: params.userEmail,
+        metadata: {
+          reportId: params.reportId,
+          launchPurchaseId,
+          region,
+          slotNumber: slotNumber.toString(),
+          priceEur: price.toString(),
+          campaignId: 'launch-2026',
+        },
+      },
+      { idempotencyKey: launchPurchaseId },
+    );
+
+    // 2. Persist the LaunchPurchase with stripeSessionId already set in a
+    //    single write — no separate create + update sequence to fail
+    //    halfway through.
+    await this.pricingService.recordPurchase({
+      id: launchPurchaseId,
       reportId: params.reportId,
       region,
       slotNumber,
@@ -123,42 +166,7 @@ export class PaymentService {
       city: params.city,
       ipHash,
       userEmail: params.userEmail,
-    });
-
-    // Create Stripe checkout session
-    const session = await this.stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'eur',
-            product_data: {
-              name: 'GDPR Detailed Report - Launch Special',
-              description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
-            },
-            unit_amount: price * 100, // Convert to cents
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: params.cancelUrl,
-      customer_email: params.userEmail,
-      metadata: {
-        reportId: params.reportId,
-        launchPurchaseId: launchPurchase.id,
-        region,
-        slotNumber: slotNumber.toString(),
-        priceEur: price.toString(),
-        campaignId: 'launch-2026',
-      },
-    });
-
-    // Update launch purchase with Stripe session ID
-    await this.prisma.launchPurchase.update({
-      where: { id: launchPurchase.id },
-      data: { stripeSessionId: session.id },
+      stripeSessionId: session.id,
     });
 
     return {
@@ -194,49 +202,56 @@ export class PaymentService {
         `pricing: ${pricing.amount} ${pricing.currency} (variant ${pricing.variant})`,
     );
 
-    // Create payment record in database
-    const payment = await this.prisma.payment.create({
+    // Pre-generate the Payment id so it can be used as Stripe metadata
+    // (the webhook looks it up by paymentId) and as Stripe idempotencyKey
+    // (so a retried request never produces two checkout sessions).
+    const paymentId = randomUUID();
+
+    // 1. Create the Stripe session FIRST. If this throws, no DB row is
+    //    written — we never end up with a PENDING Payment that has no
+    //    matching Stripe session.
+    const session = await this.stripe.checkout.sessions.create(
+      {
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: pricing.currency,
+              product_data: {
+                name: 'GDPR Compliance Full Report',
+                description:
+                  'Complete GDPR compliance analysis with detailed recommendations',
+              },
+              unit_amount: pricing.amount,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: params.cancelUrl,
+        customer_email: params.userEmail,
+        metadata: {
+          reportId: params.reportId,
+          paymentId,
+          priceVariant: pricing.variant,
+        },
+      },
+      { idempotencyKey: paymentId },
+    );
+
+    // 2. Persist Payment with stripeSessionId already set in a single write.
+    await this.prisma.payment.create({
       data: {
+        id: paymentId,
         reportId: params.reportId,
         amount: pricing.amount,
         currency: pricing.currency,
         status: 'PENDING',
         priceVariant: pricing.variant,
         userEmail: params.userEmail,
+        stripeSessionId: session.id,
       },
-    });
-
-    const session = await this.stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: pricing.currency,
-            product_data: {
-              name: 'GDPR Compliance Full Report',
-              description:
-                'Complete GDPR compliance analysis with detailed recommendations',
-            },
-            unit_amount: pricing.amount,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: params.cancelUrl,
-      customer_email: params.userEmail,
-      metadata: {
-        reportId: params.reportId,
-        paymentId: payment.id,
-        priceVariant: pricing.variant,
-      },
-    });
-
-    // Update payment with Stripe session ID
-    await this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { stripeSessionId: session.id },
     });
 
     return {

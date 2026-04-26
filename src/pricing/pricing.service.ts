@@ -166,6 +166,13 @@ export class PricingService {
    * Record a purchase in the database
    */
   async recordPurchase(data: {
+    /**
+     * Optional caller-supplied id. PaymentService pre-generates this so
+     * the same value can be used as the Stripe idempotencyKey, the
+     * Stripe metadata.launchPurchaseId, and the DB primary key — keeping
+     * Stripe and Postgres referentially consistent on retries.
+     */
+    id?: string;
     reportId: string;
     region: PricingRegion;
     slotNumber: number;
@@ -178,6 +185,7 @@ export class PricingService {
   }) {
     return this.prisma.launchPurchase.create({
       data: {
+        ...(data.id ? { id: data.id } : {}),
         reportId: data.reportId,
         region: data.region,
         slotNumber: data.slotNumber,
