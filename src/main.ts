@@ -125,6 +125,16 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
   // Global prefix for API
   app.setGlobalPrefix('api');
 
+  // Enable Nest shutdown hooks so SIGTERM / SIGINT propagate to
+  // onModuleDestroy in services that own external resources:
+  //   - PrismaService.$disconnect()
+  //   - ScannerModule → IQueueService.stopWorker() (clears polling intervals,
+  //     closes BullMQ workers, stops Cloud Run overflow monitor)
+  //   - ScannerService → BrowserManagerService.closeBrowser()
+  // Without this, container restarts leak DB connections and Playwright
+  // processes, and in-flight scans are killed mid-step.
+  app.enableShutdownHooks();
+
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
   console.log(`🚀 Server running on http://localhost:${port}/api`);

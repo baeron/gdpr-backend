@@ -235,29 +235,6 @@ export class EmailService {
   }
 
   /**
-   * Send audit confirmation email
-   * Triggered when user submits website for audit
-   */
-  async sendAuditConfirmation(
-    params: Omit<AuditConfirmationParams, 'locale'> & { locale?: string },
-  ): Promise<boolean> {
-    const locale = this.normalizeLocale(params.locale);
-    const { subject, html } = generateAuditConfirmationEmail({
-      ...params,
-      locale,
-    });
-
-    return this.sendEmail({
-      to: params.websiteUrl.includes('@') ? params.websiteUrl : '', // This was a bug - should be email
-      subject,
-      html,
-      templateType: 'audit_confirmation',
-      locale,
-      metadata: { auditId: params.auditId, websiteUrl: params.websiteUrl },
-    });
-  }
-
-  /**
    * Send audit confirmation to a specific email
    */
   async sendAuditConfirmationTo(
