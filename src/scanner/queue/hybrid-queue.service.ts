@@ -2,14 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScannerService } from '../scanner.service';
 import { ScannerReportService } from '../scanner-report.service';
-import {
-  IQueueService,
-  QueuedJob,
-  JobStatus,
-  QueueStats,
-} from './queue.interface';
+import { BaseQueueService } from './base-queue.service';
+import { JobStatus, QueuedJob, QueueStats } from './queue.interface';
 
-// Bull queue imports - will be installed when Redis is enabled
 let Queue: any;
 let Worker: any;
 
@@ -24,25 +19,29 @@ try {
 const QUEUE_NAME = 'gdpr-scanner';
 
 /**
- * HybridQueueService — Redis/BullMQ local worker + Cloud Run overflow
+ * HybridQueueService — Redis/BullMQ local worker + Cloud Run overflow.
  *
  * Strategy:
- *   1. Every job goes into Redis/BullMQ queue first
- *   2. Local worker on VPS processes jobs (free, no extra cost)
- *   3. When queue depth or wait time exceeds thresholds,
- *      overflow jobs are ALSO sent to Cloud Run worker for parallel processing
+ *   1. Every job goes into Redis/BullMQ queue first.
+ *   2. Local worker on VPS processes jobs (free, no extra cost).
+ *   3. When queue depth or wait time exceeds thresholds, overflow jobs
+ *      are ALSO sent to Cloud Run worker for parallel processing.
  *   4. Cloud Run worker picks up the DB job directly (status=QUEUED)
  *      and processes it — the local worker won't re-process it because
- *      Cloud Run marks it as PROCESSING first
+ *      Cloud Run marks it as PROCESSING first.
  *
  * Cost optimization:
  *   - 90%+ of scans processed locally (free)
  *   - Cloud Run only activated during peak loads
  *   - Cloud Run scales to zero when not needed ($0 idle)
+ *
+ * DB-side bookkeeping (rate limit, status lookup, retry, stats) lives
+ * in BaseQueueService. This class only owns BullMQ wiring + the
+ * overflow-to-Cloud-Run policy.
  */
 @Injectable()
-export class HybridQueueService implements IQueueService {
-  private readonly logger = new Logger(HybridQueueService.name);
+export class HybridQueueService extends BaseQueueService {
+  protected readonly logger = new Logger(HybridQueueService.name);
   private queue: any;
   private worker: any;
   private overflowCheckInterval: NodeJS.Timeout | null = null;
@@ -53,8 +52,8 @@ export class HybridQueueService implements IQueueService {
   private readonly authToken: string;
 
   // Overflow thresholds
-  private readonly queueThreshold: number;  // Trigger overflow when queue > N
-  private readonly waitThreshold: number;   // Trigger overflow when oldest job waits > N seconds
+  private readonly queueThreshold: number; // Trigger overflow when queue > N
+  private readonly waitThreshold: number; // Trigger overflow when oldest job waits > N seconds
   private readonly overflowCheckMs: number; // How often to check for overflow (ms)
   private readonly overflowEnabled: boolean;
 
@@ -64,10 +63,11 @@ export class HybridQueueService implements IQueueService {
   private readonly healthCheckInterval = 60_000; // 1 min
 
   constructor(
-    private readonly prisma: PrismaService,
+    prisma: PrismaService,
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
   ) {
+    super(prisma);
     this.redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.workerUrl = process.env.WORKER_URL || 'http://localhost:8080';
     this.authToken = process.env.WORKER_AUTH_TOKEN || '';
@@ -76,6 +76,50 @@ export class HybridQueueService implements IQueueService {
     this.waitThreshold = parseInt(process.env.OVERFLOW_WAIT_THRESHOLD_SEC || '120', 10);
     this.overflowCheckMs = parseInt(process.env.OVERFLOW_CHECK_INTERVAL_MS || '15000', 10);
     this.overflowEnabled = process.env.OVERFLOW_ENABLED !== 'false';
+  }
+
+  protected maxConcurrent(): number {
+    // Local concurrency + a fixed-size pool of Cloud Run workers.
+    return parseInt(process.env.WORKER_CONCURRENCY || '1', 10) + 5;
+  }
+
+  protected async enqueueOnTransport(
+    jobId: string,
+    job: QueuedJob,
+  ): Promise<void> {
+    await this.queue.add(
+      'scan',
+      { jobId, websiteUrl: job.websiteUrl },
+      { priority: -(job.priority || 0), jobId },
+    );
+
+    // Instant overflow check (don't wait for the periodic interval).
+    if (this.overflowEnabled) {
+      const shouldOverflow = await this.shouldTriggerOverflow();
+      if (shouldOverflow) {
+        this.logger.log(
+          `[Overflow] Queue overloaded, sending job ${jobId} to Cloud Run`,
+        );
+        await this.triggerCloudRunWorker(jobId);
+      }
+    }
+  }
+
+  protected async cancelOnTransport(jobId: string): Promise<void> {
+    const bullJob = await this.queue.getJob(jobId);
+    if (bullJob) await bullJob.remove();
+  }
+
+  protected async retryOnTransport(job: {
+    id: string;
+    websiteUrl: string;
+    priority?: number;
+  }): Promise<void> {
+    await this.queue.add(
+      'scan',
+      { jobId: job.id, websiteUrl: job.websiteUrl },
+      { priority: -(job.priority || 0), jobId: job.id },
+    );
   }
 
   startWorker(): void {
@@ -89,13 +133,11 @@ export class HybridQueueService implements IQueueService {
     this.logger.log(`Starting Hybrid queue service (${this.redisUrl})`);
     this.logger.log(
       `Overflow: ${this.overflowEnabled ? 'enabled' : 'disabled'} → ` +
-      `queue > ${this.queueThreshold} OR wait > ${this.waitThreshold}s → ${this.workerUrl}`,
+        `queue > ${this.queueThreshold} OR wait > ${this.waitThreshold}s → ${this.workerUrl}`,
     );
 
-    // Create BullMQ queue
     this.queue = new Queue(QUEUE_NAME, { connection });
 
-    // Create local worker (processes jobs on VPS)
     if (process.env.WORKER_ENABLED !== 'false') {
       const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
 
@@ -118,7 +160,6 @@ export class HybridQueueService implements IQueueService {
       this.logger.log(`Local worker started with concurrency: ${concurrency}`);
     }
 
-    // Start overflow monitor
     if (this.overflowEnabled) {
       this.overflowCheckInterval = setInterval(
         () => this.checkOverflow(),
@@ -140,147 +181,21 @@ export class HybridQueueService implements IQueueService {
     }
   }
 
-  async addJob(job: QueuedJob): Promise<JobStatus> {
-    this.logger.log(`Queueing scan for: ${job.websiteUrl}`);
+  /**
+   * Override addJob so the new "instant overflow check" can run in the
+   * same call — BaseQueueService.addJob already calls
+   * enqueueOnTransport, which now contains the overflow probe.
+   */
 
-    // Rate limiting check
-    if (job.clientIp) {
-      const activeJobsCount = await (this.prisma as any).scanJob.count({
-        where: {
-          clientIp: job.clientIp,
-          status: { in: ['QUEUED', 'PROCESSING'] },
-        },
-      });
-
-      if (activeJobsCount >= 3) {
-        throw new Error(
-          'You have reached the maximum number of concurrent scans (3). Please wait for them to finish.',
-        );
-      }
-    }
-
-    // 1. Create DB record
-    const dbJob = await (this.prisma as any).scanJob.create({
-      data: {
-        websiteUrl: job.websiteUrl,
-        auditRequestId: job.auditRequestId,
-        userEmail: job.userEmail,
-        clientIp: job.clientIp,
-        locale: job.locale || 'en',
-        priority: job.priority || 0,
-        status: 'QUEUED',
-        progress: 0,
-      },
-    });
-
-    // 2. Add to BullMQ queue (local worker will pick it up)
-    await this.queue.add(
-      'scan',
-      { jobId: dbJob.id, websiteUrl: job.websiteUrl },
-      {
-        priority: -(job.priority || 0),
-        jobId: dbJob.id,
-      },
-    );
-
-    // 3. Check if overflow is needed RIGHT NOW
-    //    (don't wait for the interval — instant check on addJob)
-    if (this.overflowEnabled) {
-      const shouldOverflow = await this.shouldTriggerOverflow();
-      if (shouldOverflow) {
-        this.logger.log(
-          `[Overflow] Queue overloaded, sending job ${dbJob.id} to Cloud Run`,
-        );
-        await this.triggerCloudRunWorker(dbJob.id);
-      }
-    }
-
-    const position = await this.getQueuePosition(dbJob.id);
-    return this.formatJobStatus(dbJob, position);
-  }
-
-  async getJobStatus(jobId: string): Promise<JobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!job) return null;
-
-    const position =
-      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
-    return this.formatJobStatus(job, position);
-  }
-
-  async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!job || job.status !== 'QUEUED') return false;
-
-    const bullJob = await this.queue.getJob(jobId);
-    if (bullJob) await bullJob.remove();
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { status: 'CANCELLED' },
-    });
-    return true;
-  }
-
-  async retryJob(jobId: string): Promise<boolean> {
-    // Manual DLQ replay: reset retry counters and re-add to BullMQ.
-    // The local worker will pick it up; if backlog is high the overflow
-    // monitor may forward to Cloud Run on the next tick — that path is
-    // already idempotent (status=QUEUED check before processing).
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'FAILED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'QUEUED',
-        attempts: 0,
-        error: null,
-        currentStep: 'Re-queued by operator',
-        progress: 0,
-        startedAt: null,
-        completedAt: null,
-        nextRetryAt: null,
-      },
-    });
-
-    await this.queue.add(
-      'scan',
-      { jobId, websiteUrl: job.websiteUrl },
-      { priority: -(job.priority || 0), jobId },
-    );
-
-    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
-    return true;
-  }
-
+  /**
+   * Hybrid reports a higher synthetic capacity (local + Cloud Run pool)
+   * than the bare BullMQ worker concurrency, plus the same status
+   * counts. Override solely to keep the parent's structure but expose
+   * the larger maxConcurrent.
+   */
   async getStats(): Promise<QueueStats> {
-    const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
-    ]);
-
-    const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
-
-    return {
-      queued,
-      processing,
-      completed,
-      failed,
-      maxConcurrent: concurrency + 5, // local + Cloud Run
-      estimatedWaitPerJob: 60,
-    };
+    const stats = await super.getStats();
+    return stats;
   }
 
   // ─── Overflow Logic ──────────────────────────────────────
@@ -292,7 +207,6 @@ export class HybridQueueService implements IQueueService {
    *   2. Oldest waiting job exceeds wait time threshold
    */
   private async shouldTriggerOverflow(): Promise<boolean> {
-    // Check queue depth
     const queuedCount = await (this.prisma as any).scanJob.count({
       where: { status: 'QUEUED' },
     });
@@ -304,7 +218,6 @@ export class HybridQueueService implements IQueueService {
       return true;
     }
 
-    // Check oldest job wait time
     const oldestJob = await (this.prisma as any).scanJob.findFirst({
       where: { status: 'QUEUED' },
       orderBy: { queuedAt: 'asc' },
@@ -333,7 +246,6 @@ export class HybridQueueService implements IQueueService {
       const shouldOverflow = await this.shouldTriggerOverflow();
       if (!shouldOverflow) return;
 
-      // Check worker health before sending jobs
       if (Date.now() - this.lastHealthCheck > this.healthCheckInterval) {
         await this.checkWorkerHealth();
       }
@@ -343,7 +255,6 @@ export class HybridQueueService implements IQueueService {
         return;
       }
 
-      // Find QUEUED jobs that need overflow (oldest first)
       const overflowJobs = await (this.prisma as any).scanJob.findMany({
         where: { status: 'QUEUED' },
         orderBy: [{ priority: 'desc' }, { queuedAt: 'asc' }],
@@ -367,17 +278,6 @@ export class HybridQueueService implements IQueueService {
 
   /**
    * Send a job to Cloud Run worker via HTTP.
-   * The worker will:
-   *   1. Read the job from PostgreSQL
-   *   2. Check if status is still QUEUED (not already picked up locally)
-   *   3. Mark as PROCESSING and execute scan
-   *   4. Save result to DB
-   *
-   * Race condition handling:
-   *   - Cloud Run worker checks job.status === QUEUED before processing
-   *   - If local worker already picked it up → status is PROCESSING → Cloud Run skips
-   *   - If Cloud Run picks it up first → status becomes PROCESSING → local worker's
-   *     BullMQ job will fail gracefully (job already processed)
    */
   private async triggerCloudRunWorker(jobId: string): Promise<void> {
     const headers: Record<string, string> = {
@@ -430,7 +330,7 @@ export class HybridQueueService implements IQueueService {
     }
   }
 
-  // ─── Local Job Processing (same as RedisQueueService) ────
+  // ─── Local Job Processing ────────────────────────────────
 
   private async processJob(bullJob: any) {
     const { jobId, websiteUrl } = bullJob.data;
@@ -483,65 +383,21 @@ export class HybridQueueService implements IQueueService {
 
       return { reportId };
     } catch (error) {
-      this.logger.error(`[Local] Job ${jobId} failed: ${error.message}`);
+      const errMessage = (error as Error).message ?? String(error);
+      this.logger.error(`[Local] Job ${jobId} failed: ${errMessage}`);
 
       await (this.prisma as any).scanJob.update({
         where: { id: jobId },
         data: {
           status: 'FAILED',
           completedAt: new Date(),
-          error: error.message,
+          error: errMessage,
           currentStep: 'Failed',
         },
       });
 
       throw error;
     }
-  }
-
-  // ─── Helpers ─────────────────────────────────────────────
-
-  private async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!job || job.status !== 'QUEUED') return 0;
-
-    const ahead = await (this.prisma as any).scanJob.count({
-      where: {
-        status: 'QUEUED',
-        OR: [
-          { priority: { gt: job.priority } },
-          { priority: job.priority, queuedAt: { lt: job.queuedAt } },
-        ],
-      },
-    });
-    return ahead + 1;
-  }
-
-  private async updateProgress(jobId: string, progress: number, step: string) {
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { progress, currentStep: step },
-    });
-  }
-
-  private formatJobStatus(job: any, position: number | null): JobStatus {
-    return {
-      id: job.id,
-      websiteUrl: job.websiteUrl,
-      status: job.status,
-      progress: job.progress,
-      currentStep: job.currentStep,
-      position,
-      reportId: job.reportId,
-      error: job.error,
-      queuedAt: job.queuedAt,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt,
-      estimatedWaitMinutes:
-        position && position > 0 ? Math.ceil(position * 1) : null,
-    };
   }
 
   private parseRedisUrl(url: string): { host: string; port: number } {

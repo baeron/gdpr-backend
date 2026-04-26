@@ -1,28 +1,50 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  IQueueService,
-  QueuedJob,
-  JobStatus,
-  QueueStats,
-} from './queue.interface';
+import { BaseQueueService } from './base-queue.service';
+import { QueuedJob } from './queue.interface';
 
 const FALLBACK_POLL_INTERVAL = 30_000; // 30 seconds
 const STALE_JOB_THRESHOLD_MS = 120_000; // 2 minutes — if QUEUED for longer, fallback picks it up
 
+/**
+ * CloudRunQueueService — single-instance, serverless variant. Jobs live
+ * in PostgreSQL (no broker), and a Cloud Run worker is invoked over HTTP
+ * for each new job. A fallback poller re-triggers stale QUEUED jobs in
+ * case the HTTP trigger was missed (Cloud Run cold start, transient
+ * network failure).
+ *
+ * DB-side bookkeeping (rate limit, status, retry, stats) is inherited
+ * from BaseQueueService.
+ */
 @Injectable()
-export class CloudRunQueueService implements IQueueService {
-  private readonly logger = new Logger(CloudRunQueueService.name);
+export class CloudRunQueueService extends BaseQueueService {
+  protected readonly logger = new Logger(CloudRunQueueService.name);
   private readonly workerUrl: string;
   private readonly authToken: string;
   private readonly fallbackEnabled: boolean;
   private fallbackInterval: NodeJS.Timeout | null = null;
   private workerHealthy = true;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(prisma: PrismaService) {
+    super(prisma);
     this.workerUrl = process.env.WORKER_URL || 'http://localhost:8080';
     this.authToken = process.env.WORKER_AUTH_TOKEN || '';
     this.fallbackEnabled = process.env.WORKER_FALLBACK_ENABLED !== 'false';
+  }
+
+  protected maxConcurrent(): number {
+    return 5; // Cloud Run can scale up
+  }
+
+  protected async enqueueOnTransport(
+    jobId: string,
+    _job: QueuedJob,
+  ): Promise<void> {
+    await this.triggerWorker(jobId);
+  }
+
+  protected async retryOnTransport(job: { id: string }): Promise<void> {
+    await this.triggerWorker(job.id);
   }
 
   startWorker(): void {
@@ -33,7 +55,6 @@ export class CloudRunQueueService implements IQueueService {
       `Fallback polling: ${this.fallbackEnabled ? 'enabled' : 'disabled'}`,
     );
 
-    // Start health check + fallback polling
     if (this.fallbackEnabled) {
       this.fallbackInterval = setInterval(
         () => this.checkStaleJobs(),
@@ -50,125 +71,7 @@ export class CloudRunQueueService implements IQueueService {
     this.logger.log('CloudRun queue service stopped');
   }
 
-  async addJob(job: QueuedJob): Promise<JobStatus> {
-    this.logger.log(`Queueing scan for: ${job.websiteUrl}`);
-
-    // Rate limiting check
-    if (job.clientIp) {
-      const activeJobsCount = await (this.prisma as any).scanJob.count({
-        where: {
-          clientIp: job.clientIp,
-          status: { in: ['QUEUED', 'PROCESSING'] },
-        },
-      });
-
-      if (activeJobsCount >= 3) {
-        throw new Error(
-          'You have reached the maximum number of concurrent scans (3). Please wait for them to finish.',
-        );
-      }
-    }
-
-    // 1. Create job in PostgreSQL
-    const created = await (this.prisma as any).scanJob.create({
-      data: {
-        websiteUrl: job.websiteUrl,
-        auditRequestId: job.auditRequestId,
-        userEmail: job.userEmail,
-        clientIp: job.clientIp,
-        locale: job.locale || 'en',
-        priority: job.priority || 0,
-        status: 'QUEUED',
-        progress: 0,
-      },
-    });
-
-    // 2. Trigger Cloud Run worker via HTTP
-    await this.triggerWorker(created.id);
-
-    const position = await this.getQueuePosition(created.id);
-    return this.formatJobStatus(created, position);
-  }
-
-  async getJobStatus(jobId: string): Promise<JobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job) return null;
-
-    const position =
-      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
-    return this.formatJobStatus(job, position);
-  }
-
-  async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { status: 'CANCELLED' },
-    });
-
-    return true;
-  }
-
-  async retryJob(jobId: string): Promise<boolean> {
-    // Manual DLQ replay: reset DB-side counters and re-trigger the
-    // Cloud Run worker. Trigger failure is non-fatal because the
-    // fallback polling loop also picks up stale QUEUED jobs.
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'FAILED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'QUEUED',
-        attempts: 0,
-        error: null,
-        currentStep: 'Re-queued by operator',
-        progress: 0,
-        startedAt: null,
-        completedAt: null,
-        nextRetryAt: null,
-      },
-    });
-
-    await this.triggerWorker(jobId);
-    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
-    return true;
-  }
-
-  async getStats(): Promise<QueueStats> {
-    const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
-    ]);
-
-    return {
-      queued,
-      processing,
-      completed,
-      failed,
-      maxConcurrent: 5, // Cloud Run can scale up
-      estimatedWaitPerJob: 60,
-    };
-  }
-
-  // ─── Private ─────────────────────────────────────────────
+  // ─── Cloud Run integration ───────────────────────────────────
 
   private async triggerWorker(jobId: string): Promise<void> {
     const headers: Record<string, string> = {
@@ -183,7 +86,7 @@ export class CloudRunQueueService implements IQueueService {
         method: 'POST',
         headers,
         body: JSON.stringify({ jobId }),
-        signal: AbortSignal.timeout(10_000), // 10 sec timeout for the trigger
+        signal: AbortSignal.timeout(10_000),
       });
 
       if (response.status === 202) {
@@ -243,8 +146,7 @@ export class CloudRunQueueService implements IQueueService {
   }
 
   /**
-   * Check if the Cloud Run worker is reachable.
-   * Called periodically or on-demand.
+   * Public health check used by /health endpoint and tests.
    */
   async checkWorkerHealth(): Promise<boolean> {
     try {
@@ -267,46 +169,5 @@ export class CloudRunQueueService implements IQueueService {
 
   isWorkerHealthy(): boolean {
     return this.workerHealthy;
-  }
-
-  private async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') return 0;
-
-    const ahead = await (this.prisma as any).scanJob.count({
-      where: {
-        status: 'QUEUED',
-        OR: [
-          { priority: { gt: job.priority } },
-          {
-            priority: job.priority,
-            queuedAt: { lt: job.queuedAt },
-          },
-        ],
-      },
-    });
-
-    return ahead + 1;
-  }
-
-  private formatJobStatus(job: any, position: number | null): JobStatus {
-    return {
-      id: job.id,
-      websiteUrl: job.websiteUrl,
-      status: job.status,
-      progress: job.progress,
-      currentStep: job.currentStep,
-      position,
-      reportId: job.reportId,
-      error: job.error,
-      queuedAt: job.queuedAt,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt,
-      estimatedWaitMinutes:
-        position && position > 0 ? Math.ceil(position * 1) : null,
-    };
   }
 }

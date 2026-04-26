@@ -2,14 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScannerService } from '../scanner.service';
 import { ScannerReportService } from '../scanner-report.service';
-import {
-  IQueueService,
-  QueuedJob,
-  JobStatus,
-  QueueStats,
-} from './queue.interface';
+import { BaseQueueService } from './base-queue.service';
+import { QueuedJob } from './queue.interface';
 
-// Bull queue imports - will be installed when Redis is enabled
+// BullMQ is loaded lazily so the module compiles even when the optional
+// dep isn't installed (e.g. QUEUE_TYPE=postgres deployments).
 let Queue: any;
 let Worker: any;
 
@@ -23,19 +20,62 @@ try {
 
 const QUEUE_NAME = 'gdpr-scanner';
 
+/**
+ * Redis/BullMQ-backed queue. The BullMQ broker handles delivery and the
+ * worker processes jobs in-process. Cross-cutting bookkeeping (rate
+ * limit, status, retry, stats) lives in BaseQueueService.
+ */
 @Injectable()
-export class RedisQueueService implements IQueueService {
-  private readonly logger = new Logger(RedisQueueService.name);
+export class RedisQueueService extends BaseQueueService {
+  protected readonly logger = new Logger(RedisQueueService.name);
   private queue: any;
   private worker: any;
   private readonly redisUrl: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    prisma: PrismaService,
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
   ) {
+    super(prisma);
     this.redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  }
+
+  protected maxConcurrent(): number {
+    return parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
+  }
+
+  protected async enqueueOnTransport(
+    jobId: string,
+    job: QueuedJob,
+  ): Promise<void> {
+    await this.queue.add(
+      'scan',
+      { jobId, websiteUrl: job.websiteUrl },
+      {
+        priority: -(job.priority || 0),
+        jobId,
+      },
+    );
+  }
+
+  protected async cancelOnTransport(jobId: string): Promise<void> {
+    const bullJob = await this.queue.getJob(jobId);
+    if (bullJob) {
+      await bullJob.remove();
+    }
+  }
+
+  protected async retryOnTransport(job: {
+    id: string;
+    websiteUrl: string;
+    priority?: number;
+  }): Promise<void> {
+    await this.queue.add(
+      'scan',
+      { jobId: job.id, websiteUrl: job.websiteUrl },
+      { priority: -(job.priority || 0), jobId: job.id },
+    );
   }
 
   startWorker(): void {
@@ -48,12 +88,10 @@ export class RedisQueueService implements IQueueService {
 
     this.logger.log(`Starting Redis queue worker... (${this.redisUrl})`);
 
-    // Create queue
     this.queue = new Queue(QUEUE_NAME, { connection });
 
-    // Create worker (only if WORKER_ENABLED)
     if (process.env.WORKER_ENABLED !== 'false') {
-      const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
+      const concurrency = this.maxConcurrent();
 
       this.worker = new Worker(
         QUEUE_NAME,
@@ -85,148 +123,12 @@ export class RedisQueueService implements IQueueService {
     }
   }
 
-  async addJob(job: QueuedJob): Promise<JobStatus> {
-    this.logger.log(`Queueing scan for: ${job.websiteUrl}`);
-
-    // Rate limiting check
-    if (job.clientIp) {
-      const activeJobsCount = await (this.prisma as any).scanJob.count({
-        where: {
-          clientIp: job.clientIp,
-          status: { in: ['QUEUED', 'PROCESSING'] },
-        },
-      });
-
-      if (activeJobsCount >= 3) {
-        throw new Error('You have reached the maximum number of concurrent scans (3). Please wait for them to finish.');
-      }
-    }
-
-    // Create DB record first
-    const dbJob = await (this.prisma as any).scanJob.create({
-      data: {
-        websiteUrl: job.websiteUrl,
-        auditRequestId: job.auditRequestId,
-        userEmail: job.userEmail,
-        clientIp: job.clientIp,
-        locale: job.locale || 'en',
-        priority: job.priority || 0,
-        status: 'QUEUED',
-        progress: 0,
-      },
-    });
-
-    // Add to Bull queue
-    await this.queue.add(
-      'scan',
-      { jobId: dbJob.id, websiteUrl: job.websiteUrl },
-      {
-        priority: -(job.priority || 0), // Bull uses lower = higher priority
-        jobId: dbJob.id,
-      },
-    );
-
-    const position = await this.getQueuePosition(dbJob.id);
-    return this.formatJobStatus(dbJob, position);
-  }
-
-  async getJobStatus(jobId: string): Promise<JobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job) return null;
-
-    const position =
-      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
-    return this.formatJobStatus(job, position);
-  }
-
-  async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') {
-      return false;
-    }
-
-    // Remove from Bull queue
-    const bullJob = await this.queue.getJob(jobId);
-    if (bullJob) {
-      await bullJob.remove();
-    }
-
-    // Update DB
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { status: 'CANCELLED' },
-    });
-
-    return true;
-  }
-
-  async retryJob(jobId: string): Promise<boolean> {
-    // Manual DLQ replay: re-queue a FAILED job into BullMQ and reset
-    // its DB-side retry counters. Idempotent — calling on a non-FAILED
-    // job is a no-op returning false.
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'FAILED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'QUEUED',
-        attempts: 0,
-        error: null,
-        currentStep: 'Re-queued by operator',
-        progress: 0,
-        startedAt: null,
-        completedAt: null,
-        nextRetryAt: null,
-      },
-    });
-
-    await this.queue.add(
-      'scan',
-      { jobId, websiteUrl: job.websiteUrl },
-      { priority: -(job.priority || 0), jobId },
-    );
-
-    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
-    return true;
-  }
-
-  async getStats(): Promise<QueueStats> {
-    const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
-    ]);
-
-    const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
-
-    return {
-      queued,
-      processing,
-      completed,
-      failed,
-      maxConcurrent: concurrency,
-      estimatedWaitPerJob: 60,
-    };
-  }
+  // ─── Worker job processor ───────────────────────────────────────────────
 
   private async processJob(bullJob: any) {
     const { jobId, websiteUrl } = bullJob.data;
     this.logger.log(`Processing job ${jobId} for ${websiteUrl}`);
 
-    // Update DB status
     await (this.prisma as any).scanJob.update({
       where: { id: jobId },
       data: {
@@ -261,68 +163,21 @@ export class RedisQueueService implements IQueueService {
 
       return { reportId };
     } catch (error) {
-      this.logger.error(`Job ${jobId} failed: ${error.message}`);
+      const errMessage = (error as Error).message ?? String(error);
+      this.logger.error(`Job ${jobId} failed: ${errMessage}`);
 
       await (this.prisma as any).scanJob.update({
         where: { id: jobId },
         data: {
           status: 'FAILED',
           completedAt: new Date(),
-          error: error.message,
+          error: errMessage,
           currentStep: 'Failed',
         },
       });
 
       throw error;
     }
-  }
-
-  private async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') return 0;
-
-    const ahead = await (this.prisma as any).scanJob.count({
-      where: {
-        status: 'QUEUED',
-        OR: [
-          { priority: { gt: job.priority } },
-          {
-            priority: job.priority,
-            queuedAt: { lt: job.queuedAt },
-          },
-        ],
-      },
-    });
-
-    return ahead + 1;
-  }
-
-  private async updateProgress(jobId: string, progress: number, step: string) {
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { progress, currentStep: step },
-    });
-  }
-
-  private formatJobStatus(job: any, position: number | null): JobStatus {
-    return {
-      id: job.id,
-      websiteUrl: job.websiteUrl,
-      status: job.status,
-      progress: job.progress,
-      currentStep: job.currentStep,
-      position,
-      reportId: job.reportId,
-      error: job.error,
-      queuedAt: job.queuedAt,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt,
-      estimatedWaitMinutes:
-        position && position > 0 ? Math.ceil(position * 1) : null,
-    };
   }
 
   private parseRedisUrl(url: string): { host: string; port: number } {

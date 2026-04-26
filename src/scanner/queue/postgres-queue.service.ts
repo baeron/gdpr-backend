@@ -2,37 +2,51 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScannerService } from '../scanner.service';
 import { ScannerReportService } from '../scanner-report.service';
-import {
-  IQueueService,
-  QueuedJob,
-  JobStatus,
-  QueueStats,
-} from './queue.interface';
+import { BaseQueueService, computeBackoffMs } from './base-queue.service';
+import { QueuedJob } from './queue.interface';
 
 const MAX_CONCURRENT_SCANS = 1;
 const POLL_INTERVAL = 5000;
 
 /**
- * Exponential backoff delay (ms) before the Nth retry.
- * attempts=1 → 30s, 2 → 1m, 3 → 2m, capped at 5m.
+ * PostgreSQL-backed queue: no external broker, the worker polls the
+ * ScanJob table for the next eligible job. All cross-cutting bookkeeping
+ * (rate limiting, status tracking, retry, stats) lives in
+ * BaseQueueService.
  */
-function computeBackoffMs(attempts: number): number {
-  const base = 30_000;
-  const cap = 5 * 60_000;
-  return Math.min(base * Math.pow(2, Math.max(0, attempts - 1)), cap);
-}
-
 @Injectable()
-export class PostgresQueueService implements IQueueService {
-  private readonly logger = new Logger(PostgresQueueService.name);
+export class PostgresQueueService extends BaseQueueService {
+  protected readonly logger = new Logger(PostgresQueueService.name);
   private isProcessing = false;
   private pollInterval: NodeJS.Timeout | null = null;
 
   constructor(
-    private readonly prisma: PrismaService,
+    prisma: PrismaService,
     private readonly scannerService: ScannerService,
     private readonly reportService: ScannerReportService,
-  ) {}
+  ) {
+    super(prisma);
+  }
+
+  protected maxConcurrent(): number {
+    return MAX_CONCURRENT_SCANS;
+  }
+
+  /**
+   * Postgres has no external transport — enqueueing is just a hint to
+   * wake the polling loop immediately rather than wait up to
+   * POLL_INTERVAL ms for the next tick.
+   */
+  protected async enqueueOnTransport(
+    _jobId: string,
+    _job: QueuedJob,
+  ): Promise<void> {
+    setImmediate(() => this.processNextJob());
+  }
+
+  protected async retryOnTransport(): Promise<void> {
+    setImmediate(() => this.processNextJob());
+  }
 
   startWorker(): void {
     this.logger.log('Starting PostgreSQL queue worker...');
@@ -50,142 +64,7 @@ export class PostgresQueueService implements IQueueService {
     }
   }
 
-  async addJob(job: QueuedJob): Promise<JobStatus> {
-    this.logger.log(`Queueing scan for: ${job.websiteUrl}`);
-
-    // Rate limiting check
-    if (job.clientIp) {
-      const activeJobsCount = await (this.prisma as any).scanJob.count({
-        where: {
-          clientIp: job.clientIp,
-          status: { in: ['QUEUED', 'PROCESSING'] },
-        },
-      });
-
-      if (activeJobsCount >= 3) {
-        throw new Error('You have reached the maximum number of concurrent scans (3). Please wait for them to finish.');
-      }
-    }
-
-    const created = await (this.prisma as any).scanJob.create({
-      data: {
-        websiteUrl: job.websiteUrl,
-        auditRequestId: job.auditRequestId,
-        userEmail: job.userEmail,
-        clientIp: job.clientIp,
-        locale: job.locale || 'en',
-        priority: job.priority || 0,
-        status: 'QUEUED',
-        progress: 0,
-      },
-    });
-
-    const position = await this.getQueuePosition(created.id);
-    setImmediate(() => this.processNextJob());
-
-    return this.formatJobStatus(created, position);
-  }
-
-  async getJobStatus(jobId: string): Promise<JobStatus | null> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job) return null;
-
-    const position =
-      job.status === 'QUEUED' ? await this.getQueuePosition(jobId) : null;
-    return this.formatJobStatus(job, position);
-  }
-
-  async cancelJob(jobId: string): Promise<boolean> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { status: 'CANCELLED' },
-    });
-
-    return true;
-  }
-
-  async retryJob(jobId: string): Promise<boolean> {
-    // Manual DLQ replay: only FAILED jobs can be retried. Reset
-    // attempts so the worker gets a full retry budget again, clear
-    // stale per-attempt state, and put the job back in QUEUED.
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'FAILED') {
-      return false;
-    }
-
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'QUEUED',
-        attempts: 0,
-        error: null,
-        currentStep: 'Re-queued by operator',
-        progress: 0,
-        startedAt: null,
-        completedAt: null,
-        nextRetryAt: null,
-      },
-    });
-
-    this.logger.log(`Job ${jobId} manually re-queued from FAILED`);
-    setImmediate(() => this.processNextJob());
-    return true;
-  }
-
-  async getStats(): Promise<QueueStats> {
-    const [queued, processing, completed, failed] = await Promise.all([
-      (this.prisma as any).scanJob.count({ where: { status: 'QUEUED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'PROCESSING' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'COMPLETED' } }),
-      (this.prisma as any).scanJob.count({ where: { status: 'FAILED' } }),
-    ]);
-
-    return {
-      queued,
-      processing,
-      completed,
-      failed,
-      maxConcurrent: MAX_CONCURRENT_SCANS,
-      estimatedWaitPerJob: 60,
-    };
-  }
-
-  private async getQueuePosition(jobId: string): Promise<number> {
-    const job = await (this.prisma as any).scanJob.findUnique({
-      where: { id: jobId },
-    });
-
-    if (!job || job.status !== 'QUEUED') return 0;
-
-    const ahead = await (this.prisma as any).scanJob.count({
-      where: {
-        status: 'QUEUED',
-        OR: [
-          { priority: { gt: job.priority } },
-          {
-            priority: job.priority,
-            queuedAt: { lt: job.queuedAt },
-          },
-        ],
-      },
-    });
-
-    return ahead + 1;
-  }
+  // ─── Worker loop ────────────────────────────────────────────────────────
 
   private async processNextJob() {
     if (this.isProcessing) return;
@@ -217,7 +96,9 @@ export class PostgresQueueService implements IQueueService {
     try {
       await this.executeJob(nextJob);
     } catch (error) {
-      this.logger.error(`Job ${nextJob.id} failed: ${error.message}`);
+      this.logger.error(
+        `Job ${nextJob.id} failed: ${(error as Error).message}`,
+      );
     } finally {
       this.isProcessing = false;
     }
@@ -268,9 +149,7 @@ export class PostgresQueueService implements IQueueService {
       const maxAttempts = job.maxAttempts ?? 3;
 
       if (attempts < maxAttempts) {
-        // Re-queue for a later retry with exponential backoff. Status
-        // returns to QUEUED so the worker's polling loop will pick it
-        // up again — but only after nextRetryAt has elapsed.
+        // Re-queue for a later retry with exponential backoff.
         const backoffMs = computeBackoffMs(attempts);
         const nextRetryAt = new Date(Date.now() + backoffMs);
         this.logger.warn(
@@ -304,30 +183,5 @@ export class PostgresQueueService implements IQueueService {
         });
       }
     }
-  }
-
-  private async updateProgress(jobId: string, progress: number, step: string) {
-    await (this.prisma as any).scanJob.update({
-      where: { id: jobId },
-      data: { progress, currentStep: step },
-    });
-  }
-
-  private formatJobStatus(job: any, position: number | null): JobStatus {
-    return {
-      id: job.id,
-      websiteUrl: job.websiteUrl,
-      status: job.status,
-      progress: job.progress,
-      currentStep: job.currentStep,
-      position,
-      reportId: job.reportId,
-      error: job.error,
-      queuedAt: job.queuedAt,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt,
-      estimatedWaitMinutes:
-        position && position > 0 ? Math.ceil(position * 1) : null,
-    };
   }
 }
