@@ -362,41 +362,51 @@ export class PaymentService {
     const reportId = session.metadata?.reportId;
     const paymentId = session.metadata?.paymentId;
     const launchPurchaseId = session.metadata?.launchPurchaseId;
+    const paymentIntentId = session.payment_intent as string;
 
-    // Handle launch campaign purchase
-    if (launchPurchaseId && this.pricingService) {
-      await this.pricingService.updatePurchaseStatus(
-        session.id,
-        'COMPLETED',
-        session.payment_intent as string,
-      );
+    // All three writes (LaunchPurchase / Payment / AuditReport unlock)
+    // must be applied atomically: a partial failure would leave the user
+    // having paid Stripe without the report being unlocked, or vice-versa.
+    await this.prisma.$transaction(async (tx) => {
+      // Launch campaign purchase
+      if (launchPurchaseId && this.pricingService) {
+        await this.pricingService.updatePurchaseStatus(
+          session.id,
+          'COMPLETED',
+          paymentIntentId,
+          tx as unknown as Pick<PrismaService, 'launchPurchase'>,
+        );
+      }
+
+      // Regular payment
+      if (paymentId) {
+        await tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: 'COMPLETED',
+            stripePaymentIntentId: paymentIntentId,
+          },
+        });
+      }
+
+      // Unlock full report for both purchase flows
+      if (reportId) {
+        await tx.auditReport.update({
+          where: { id: reportId },
+          data: { fullReportUnlocked: true },
+        });
+      }
+    });
+
+    if (launchPurchaseId) {
       this.logger.log(`Launch purchase completed: ${launchPurchaseId}`);
-      
-      // Broadcast pricing update to WebSocket clients
       const region = session.metadata?.region;
       if (region) {
         // Note: Gateway broadcast will be called via PricingGateway injection
         this.logger.log(`Price updated for region ${region}`);
       }
     }
-
-    // Handle regular payment
-    if (paymentId) {
-      await this.prisma.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: 'COMPLETED',
-          stripePaymentIntentId: session.payment_intent as string,
-        },
-      });
-    }
-
-    // Unlock full report for both types of purchases
     if (reportId) {
-      await this.prisma.auditReport.update({
-        where: { id: reportId },
-        data: { fullReportUnlocked: true },
-      });
       this.logger.log(`Full report unlocked for: ${reportId}`);
     }
   }

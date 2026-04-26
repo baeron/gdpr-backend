@@ -194,14 +194,21 @@ export class PricingService {
   }
 
   /**
-   * Update purchase status (after Stripe webhook)
+   * Update purchase status (after Stripe webhook).
+   *
+   * Accepts an optional transaction client so the caller can group this
+   * update with other writes (e.g. Payment + AuditReport) into a single
+   * atomic transaction. Falls back to the service-level Prisma client
+   * when called outside a transaction.
    */
   async updatePurchaseStatus(
     stripeSessionId: string,
     status: 'COMPLETED' | 'FAILED' | 'EXPIRED',
     stripePaymentIntentId?: string,
+    tx?: Pick<PrismaService, 'launchPurchase'>,
   ) {
-    return this.prisma.launchPurchase.update({
+    const client = tx ?? this.prisma;
+    return client.launchPurchase.update({
       where: { stripeSessionId },
       data: {
         status,

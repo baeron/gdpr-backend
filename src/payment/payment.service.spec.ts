@@ -115,6 +115,99 @@ describe('PaymentService', () => {
     });
   });
 
+  describe('handleCheckoutCompleted (transaction)', () => {
+    /**
+     * The webhook handler must apply Payment.update + AuditReport.update
+     * (and optionally LaunchPurchase.update) inside a single
+     * prisma.$transaction so a partial DB failure cannot leave the user
+     * paid-but-locked or vice-versa.
+     */
+    it('runs all writes inside a single $transaction', async () => {
+      const txClient = {
+        payment: { update: jest.fn().mockResolvedValue({}) },
+        auditReport: { update: jest.fn().mockResolvedValue({}) },
+        launchPurchase: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const txSpy = jest
+        .fn()
+        .mockImplementation(async (cb: any) => cb(txClient));
+
+      const prisma: any = {
+        ...mockPrisma,
+        $transaction: txSpy,
+      };
+      const pricingService: any = {
+        updatePurchaseStatus: jest.fn(async (id, status, intent, tx) => {
+          // Caller must forward the tx client so the launchPurchase update
+          // is part of the same atomic transaction.
+          expect(tx).toBe(txClient);
+          return tx.launchPurchase.update({
+            where: { stripeSessionId: id },
+            data: { status, stripePaymentIntentId: intent },
+          });
+        }),
+      };
+
+      const svc = new PaymentService(
+        mockConfigService as ConfigService,
+        prisma,
+        pricingService,
+      );
+
+      // Call the private handler via bracket access
+      await (svc as any).handleCheckoutCompleted({
+        id: 'sess_1',
+        payment_intent: 'pi_1',
+        metadata: {
+          reportId: 'report-1',
+          paymentId: 'pay-1',
+          launchPurchaseId: 'launch-1',
+          region: 'EU',
+        },
+      });
+
+      expect(txSpy).toHaveBeenCalledTimes(1);
+      expect(pricingService.updatePurchaseStatus).toHaveBeenCalledTimes(1);
+      expect(txClient.payment.update).toHaveBeenCalledTimes(1);
+      expect(txClient.auditReport.update).toHaveBeenCalledTimes(1);
+      expect(txClient.launchPurchase.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not partially update when one write fails', async () => {
+      const txSpy = jest
+        .fn()
+        .mockImplementation(async (cb: any) => {
+          // Simulate Prisma rolling back the whole transaction on error.
+          const tx = {
+            payment: { update: jest.fn().mockResolvedValue({}) },
+            auditReport: {
+              update: jest.fn().mockRejectedValue(new Error('DB down')),
+            },
+            launchPurchase: { update: jest.fn() },
+          };
+          return cb(tx);
+        });
+
+      const prisma: any = { ...mockPrisma, $transaction: txSpy };
+      const svc = new PaymentService(
+        mockConfigService as ConfigService,
+        prisma,
+      );
+
+      await expect(
+        (svc as any).handleCheckoutCompleted({
+          id: 'sess_1',
+          payment_intent: 'pi_1',
+          metadata: { reportId: 'report-1', paymentId: 'pay-1' },
+        }),
+      ).rejects.toThrow('DB down');
+
+      // Top-level prisma writes must NOT be called outside the tx
+      expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+      expect(mockPrisma.auditReport.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('isReportUnlocked', () => {
     it('should return false when report is not unlocked', async () => {
       const result = await service.isReportUnlocked('report-1');
