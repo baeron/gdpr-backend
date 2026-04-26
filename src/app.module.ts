@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { IdempotencyModule } from './common/idempotency/idempotency.module';
@@ -40,6 +41,8 @@ const conditionalImports = needsRedis
       envFilePath: '.env',
     }),
     ...conditionalImports,
+    // Required by IdempotencyCleanupService and any future @Cron jobs.
+    ScheduleModule.forRoot(),
     TurnstileModule,
     PrismaModule,
     IdempotencyModule,
