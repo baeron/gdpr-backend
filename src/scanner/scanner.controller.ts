@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
+import { Idempotent } from '../common/idempotency/idempotency.interceptor';
 import type { Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import {
@@ -322,6 +323,7 @@ Performs a comprehensive GDPR compliance scan on the specified website.
 
   @Throttle({ short: { ttl: 60000, limit: 5 }, medium: { ttl: 3600000, limit: 30 } })
   @UseGuards(TurnstileGuard)
+  @Idempotent()
   @Post('queue')
   @ApiOperation({
     summary: 'Queue a scan (async, recommended)',

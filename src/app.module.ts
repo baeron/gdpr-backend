@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RedisModule } from '@nestjs-modules/ioredis';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { IdempotencyModule } from './common/idempotency/idempotency.module';
+import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -40,6 +42,7 @@ const conditionalImports = needsRedis
     ...conditionalImports,
     TurnstileModule,
     PrismaModule,
+    IdempotencyModule,
     EmailModule,
     AuditModule,
     ScannerModule,
@@ -71,6 +74,14 @@ const conditionalImports = needsRedis
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      // Global so any controller method tagged with @Idempotent() is
+      // covered without re-wiring per controller. Untagged routes
+      // pass through unchanged (the interceptor checks the metadata
+      // before doing any work).
+      provide: APP_INTERCEPTOR,
+      useClass: IdempotencyInterceptor,
     },
   ],
 })

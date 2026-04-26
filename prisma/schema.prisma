@@ -168,6 +168,21 @@ model ScanJob {
   @@index([status, nextRetryAt])
 }
 
+// Idempotency cache for unsafe HTTP methods (POST). See migration
+// 20260426120000_add_idempotency_record for the rationale.
+model IdempotencyRecord {
+  key            String
+  endpoint       String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@id([key, endpoint])
+  @@index([expiresAt])
+}
+
 enum ScanJobStatus {
   QUEUED      // Waiting in queue
   PROCESSING  // Currently scanning
