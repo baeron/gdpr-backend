@@ -9,6 +9,7 @@
  *   API Server (NestJS) → HTTP trigger → This Worker → PostgreSQL
  */
 
+import { Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { ScannerService } from '../scanner/scanner.service';
 import { ScannerReportService } from '../scanner/scanner-report.service';
@@ -16,7 +17,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import http from 'node:http';
 
 // ─── Configuration ───────────────────────────────────────────
-const PORT = parseInt(process.env.WORKER_PORT || process.env.PORT || '8080', 10);
+const PORT = parseInt(
+  process.env.WORKER_PORT || process.env.PORT || '8080',
+  10,
+);
 const AUTH_TOKEN = process.env.WORKER_AUTH_TOKEN || '';
 const MAX_CONCURRENT = parseInt(process.env.WORKER_MAX_CONCURRENT || '1', 10);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -33,7 +37,7 @@ const reportService = new ScannerReportService(prismaService);
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-function parseBody(req: http.IncomingMessage): Promise<any> {
+function parseBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -53,12 +57,16 @@ function respond(res: http.ServerResponse, status: number, body: object) {
   res.end(JSON.stringify(body));
 }
 
+// Use Nest's Logger so the standalone worker writes to the same
+// structured stream as the API (consistent prefixes, level, timestamp).
+const logger = new Logger('Worker');
+
 function log(msg: string) {
-  console.log(`[Worker ${new Date().toISOString()}] ${msg}`);
+  logger.log(msg);
 }
 
 function logError(msg: string) {
-  console.error(`[Worker ${new Date().toISOString()}] ERROR: ${msg}`);
+  logger.error(msg);
 }
 
 // ─── Auth ────────────────────────────────────────────────────
@@ -75,7 +83,7 @@ async function executeScan(jobId: string): Promise<void> {
   log(`Processing job ${jobId}`);
 
   // 1. Fetch job from DB
-  const job = await (prisma as any).scanJob.findUnique({
+  const job = await prisma.scanJob.findUnique({
     where: { id: jobId },
   });
 
@@ -90,7 +98,7 @@ async function executeScan(jobId: string): Promise<void> {
   }
 
   // 2. Mark as PROCESSING
-  await (prisma as any).scanJob.update({
+  await prisma.scanJob.update({
     where: { id: jobId },
     data: {
       status: 'PROCESSING',
@@ -104,7 +112,7 @@ async function executeScan(jobId: string): Promise<void> {
 
   try {
     // 3. Update progress: Loading website
-    await (prisma as any).scanJob.update({
+    await prisma.scanJob.update({
       where: { id: jobId },
       data: { progress: 10, currentStep: 'Loading website...' },
     });
@@ -113,7 +121,7 @@ async function executeScan(jobId: string): Promise<void> {
     const result = await scannerService.scanWebsite(job.websiteUrl);
 
     // 5. Update progress: Saving results
-    await (prisma as any).scanJob.update({
+    await prisma.scanJob.update({
       where: { id: jobId },
       data: { progress: 90, currentStep: 'Saving results...' },
     });
@@ -125,7 +133,7 @@ async function executeScan(jobId: string): Promise<void> {
     );
 
     // 7. Mark as COMPLETED
-    await (prisma as any).scanJob.update({
+    await prisma.scanJob.update({
       where: { id: jobId },
       data: {
         status: 'COMPLETED',
@@ -141,7 +149,7 @@ async function executeScan(jobId: string): Promise<void> {
     const message = error instanceof Error ? error.message : 'Unknown error';
     logError(`Job ${jobId} failed: ${message}`);
 
-    await (prisma as any).scanJob.update({
+    await prisma.scanJob.update({
       where: { id: jobId },
       data: {
         status: 'FAILED',
@@ -157,6 +165,7 @@ async function executeScan(jobId: string): Promise<void> {
 
 // ─── HTTP Server ─────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-misused-promises -- http.createServer signature accepts only sync handlers; the Promise we return is intentionally fire-and-forget (we always end the response before awaiting).
 const server = http.createServer(async (req, res) => {
   const url = req.url || '';
   const method = req.method || '';
@@ -199,14 +208,17 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    let body: any;
+    let body: unknown;
     try {
       body = await parseBody(req);
     } catch {
       return respond(res, 400, { error: 'Invalid JSON body' });
     }
 
-    const { jobId } = body;
+    const jobId =
+      typeof body === 'object' && body !== null
+        ? (body as { jobId?: unknown }).jobId
+        : undefined;
     if (!jobId || typeof jobId !== 'string') {
       return respond(res, 400, { error: 'Missing or invalid jobId' });
     }
@@ -215,8 +227,9 @@ const server = http.createServer(async (req, res) => {
     respond(res, 202, { status: 'accepted', jobId });
 
     // Execute scan asynchronously
-    executeScan(jobId).catch((err) => {
-      logError(`Unhandled error in executeScan: ${err.message}`);
+    executeScan(jobId).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logError(`Unhandled error in executeScan: ${msg}`);
     });
 
     return;
@@ -252,8 +265,12 @@ async function shutdown(signal: string) {
   process.exit(0);
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
 
 // ─── Start ───────────────────────────────────────────────────
 

@@ -1,0 +1,23 @@
+# Run prettier + eslint --fix on staged files only.
+# Full test runs go through CI; pre-commit is a fast quality gate.
+#
+# Husky's PATH is intentionally narrow (no npx, no nvm shim). Probe
+# the most common Node install locations so the hook works for nvm,
+# Homebrew, system, asdf and Volta users without each developer
+# having to maintain ~/.config/husky/init.sh.
+if ! command -v node >/dev/null 2>&1; then
+  for candidate in \
+    "$HOME/.nvm/versions/node"/*/bin \
+    "$HOME/.volta/bin" \
+    "$HOME/.asdf/shims" \
+    /opt/homebrew/bin \
+    /usr/local/bin
+  do
+    if [ -x "$candidate/node" ]; then
+      export PATH="$candidate:$PATH"
+      break
+    fi
+  done
+fi
+
+./node_modules/.bin/lint-staged

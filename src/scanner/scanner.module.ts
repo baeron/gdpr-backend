@@ -1,4 +1,10 @@
-import { Module, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import {
+  Module,
+  OnModuleInit,
+  OnModuleDestroy,
+  Inject,
+  Logger,
+} from '@nestjs/common';
 import { ScannerController } from './scanner.controller';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
@@ -33,22 +39,23 @@ const queueProvider = {
     report: ScannerReportService,
   ) => {
     const queueType = process.env.QUEUE_TYPE || 'redis';
+    const logger = new Logger('ScannerModule');
 
     switch (queueType) {
       case 'hybrid':
-        console.log('🔀 Using Hybrid queue (Redis local + Cloud Run overflow)');
+        logger.log('Using Hybrid queue (Redis local + Cloud Run overflow)');
         return new HybridQueueService(prisma, scanner, report);
 
       case 'redis':
-        console.log('📦 Using Redis/BullMQ queue');
+        logger.log('Using Redis/BullMQ queue');
         return new RedisQueueService(prisma, scanner, report);
 
       case 'cloudrun':
-        console.log('☁️  Using Cloud Run serverless worker');
+        logger.log('Using Cloud Run serverless worker');
         return new CloudRunQueueService(prisma);
 
       default:
-        console.log('📦 Using PostgreSQL queue');
+        logger.log('Using PostgreSQL queue');
         return new PostgresQueueService(prisma, scanner, report);
     }
   },

@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import {
+  Logger,
   ValidationPipe,
   VersioningType,
   VERSION_NEUTRAL,
@@ -24,7 +25,7 @@ async function bootstrap() {
   });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  
+
   // Trust proxy is required for correct IP detection behind load balancers/reverse proxies
   // This is critical for ThrottlerGuard (rate limiting) to work per-IP rather than globally
   app.set('trust proxy', 1);
@@ -73,7 +74,7 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
         directives: {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'", "'unsafe-inline'"], // needed for Swagger UI
-          styleSrc: ["'self'", "'unsafe-inline'"],  // needed for Swagger UI
+          styleSrc: ["'self'", "'unsafe-inline'"], // needed for Swagger UI
           imgSrc: ["'self'", 'data:', 'https:'],
         },
       },
@@ -153,6 +154,11 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
-  console.log(`🚀 Server running on http://localhost:${port}/api`);
+  // Use Nest's Logger so the startup line lands in the same structured
+  // stream as everything else (consistent prefixes, color, future
+  // pino/Sentry redirection).
+  new Logger('Bootstrap').log(
+    `Server running on http://localhost:${port}/api  (versioned: /api/v1)`,
+  );
 }
 void bootstrap();
