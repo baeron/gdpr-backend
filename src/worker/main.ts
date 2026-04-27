@@ -10,11 +10,35 @@
  */
 
 import { Logger } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import { PrismaClient } from '@prisma/client';
 import { ScannerService } from '../scanner/scanner.service';
 import { ScannerReportService } from '../scanner/scanner-report.service';
 import { PrismaService } from '../prisma/prisma.service';
 import http from 'node:http';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { version: APP_VERSION } = require('../../package.json') as {
+  version: string;
+};
+
+// Sentry must be initialised BEFORE any code that might throw.
+// The worker's failure modes (Playwright crashes, OOM, network
+// timeouts during scanning) are exactly the unactionable-from-logs
+// errors that error tracking is meant to catch.
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || 'development',
+  release: `gdpr-worker@${APP_VERSION}`,
+  serverName: process.env.HOSTNAME || 'cloud-run-worker',
+  // Worker has fewer requests than the API; afford slightly more
+  // tracing without blowing the free-tier quota.
+  tracesSampleRate:
+    process.env.NODE_ENV === 'production'
+      ? Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.2)
+      : 1.0,
+  ignoreErrors: ['ECONNRESET', 'ETIMEDOUT', 'aborted'],
+});
 
 // ─── Configuration ───────────────────────────────────────────
 const PORT = parseInt(
@@ -149,6 +173,15 @@ async function executeScan(jobId: string): Promise<void> {
     const message = error instanceof Error ? error.message : 'Unknown error';
     logError(`Job ${jobId} failed: ${message}`);
 
+    // Attach scan context to the Sentry event so we can correlate
+    // failures with specific URLs / job IDs without searching logs.
+    Sentry.withScope((scope) => {
+      scope.setTag('jobId', jobId);
+      scope.setTag('websiteUrl', job.websiteUrl);
+      scope.setLevel('error');
+      Sentry.captureException(error);
+    });
+
     await prisma.scanJob.update({
       where: { id: jobId },
       data: {
@@ -261,6 +294,10 @@ async function shutdown(signal: string) {
 
   // Cleanup
   await prisma.$disconnect();
+  // Give Sentry up to 2s to flush any in-flight events; without this
+  // a SIGTERM during a failed scan can lose the very error we'd want
+  // to see in Sentry.
+  await Sentry.close(2000);
   log('Worker shut down cleanly');
   process.exit(0);
 }

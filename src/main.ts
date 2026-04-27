@@ -14,14 +14,67 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
 
+// package.json version is the canonical release identifier — passed
+// as a build-time constant so we don't need a runtime require() and
+// can keep tsconfig.resolveJsonModule untouched.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { version: APP_VERSION } = require('../package.json') as {
+  version: string;
+};
+
 async function bootstrap() {
-  // Initialize Sentry
+  const dsn = process.env.SENTRY_DSN;
+  const env = process.env.NODE_ENV || 'development';
+  const isProd = env === 'production';
+
+  // Sentry.init() is a no-op when DSN is undefined, but we still want
+  // an explicit warning in production so a misconfigured deploy is
+  // visible in startup logs instead of silently losing all errors.
+  if (!dsn && isProd) {
+    console.warn(
+      '[Sentry] SENTRY_DSN is unset in production — error tracking disabled.',
+    );
+  }
+
   Sentry.init({
-    dsn: process.env.SENTRY_DSN, // Will do nothing if DSN is undefined
+    dsn,
+    environment: env,
+    release: `gdpr-backend@${APP_VERSION}`,
     integrations: [nodeProfilingIntegration()],
-    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
-    profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
-    environment: process.env.NODE_ENV || 'development',
+    // Free-tier-friendly defaults. Override via env on hot endpoints
+    // if we need higher resolution; full sampling only in dev.
+    tracesSampleRate: isProd
+      ? Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1)
+      : 1.0,
+    profilesSampleRate: isProd
+      ? Number(process.env.SENTRY_PROFILES_SAMPLE_RATE ?? 0.1)
+      : 1.0,
+    // Known noise — these aren't actionable bugs, they're either
+    // expected client behaviour (aborts, timeouts) or third-party
+    // hiccups we already handle elsewhere.
+    ignoreErrors: [
+      'ECONNRESET',
+      'ECONNABORTED',
+      'ETIMEDOUT',
+      'EPIPE',
+      'Request aborted',
+      'aborted',
+      // Prisma "record not found" — surfaced as a 404 to clients,
+      // never a server-side bug.
+      'P2025',
+    ],
+    // Last-line-of-defence filter: HttpException subclasses (4xx +
+    // some 5xx like ServiceUnavailable) are intentionally raised
+    // business errors. They never indicate a code bug, so dropping
+    // them keeps the Sentry quota for things we can actually fix.
+    beforeSend(event, hint) {
+      const err = hint.originalException;
+      if (err && typeof err === 'object' && 'getStatus' in err) {
+        const status = (err as { getStatus: () => number }).getStatus();
+        if (status < 500) return null;
+      }
+      return event;
+    },
   });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -151,6 +204,15 @@ Score is calculated 0-100 based on issues found. Higher score = better complianc
   // Without this, container restarts leak DB connections and Playwright
   // processes, and in-flight scans are killed mid-step.
   app.enableShutdownHooks();
+
+  // Make sure Sentry events get flushed during graceful shutdown.
+  // Nest's hooks await onModuleDestroy on every provider but know
+  // nothing about Sentry's transport queue.
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => {
+      void Sentry.close(2000);
+    });
+  }
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);

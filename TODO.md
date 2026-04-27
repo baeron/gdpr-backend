@@ -82,29 +82,37 @@ git push --force --tags
 
 ## 🟡 Важно (1–2 спринта)
 
-### 3. Sentry DSN в production
+### 3. Sentry DSN в production ✅ КОД ГОТОВ — нужен только DSN
 
-**Контекст:** Sentry SDK уже подключён (`src/main.ts`), но без DSN
-в env он работает в no-op режиме.
+**Сделано в коде:**
 
-**Что сделать:**
+- `Sentry.init()` в API (`src/main.ts`) — release из `package.json`,
+  free-tier-friendly sample rates, `beforeSend` фильтр на 4xx,
+  `ignoreErrors` для известного шума (ECONNRESET, P2025, etc.)
+- `Sentry.init()` в worker (`src/worker/main.ts`) с release
+  `gdpr-worker@x.y.z` — та же DSN, отдельный release tag
+- `Sentry.captureException` в `GlobalExceptionFilter` (только 5xx)
+- В worker scan failure path — `withScope` с тегами `jobId` +
+  `websiteUrl` для корреляции
+- `Sentry.close(2000)` на SIGTERM/SIGINT в обоих процессах
+- Startup warning если `SENTRY_DSN` пустой в production
 
-1. Создать проект в [sentry.io](https://sentry.io) (бесплатный план
-   покрывает наш объём ошибок).
-2. Скопировать DSN из Project Settings → Client Keys.
-3. Добавить в production env:
+**Что осталось (ручные действия):**
+
+1. Создать проект на [sentry.io](https://sentry.io) (бесплатный
+   план — 5k events/мес, нам с запасом).
+2. Project Settings → Client Keys → скопировать DSN.
+3. Добавить в production env (Vultr / Cloud Run):
    ```
-   SENTRY_DSN=https://...@sentry.io/...
-   SENTRY_ENVIRONMENT=production
-   SENTRY_TRACES_SAMPLE_RATE=0.1
+   SENTRY_DSN=https://xxxxxxxx@o0.ingest.sentry.io/0000000
    ```
-4. Проверить в Sentry dashboard что ошибки приходят (намеренно
-   бросить тестовую `throw new Error('sentry-test')` в защищённом
-   endpoint и убрать).
+   Опционально: `SENTRY_TRACES_SAMPLE_RATE` (default 0.1).
+4. Smoke-test: бросить `throw new Error('sentry-smoke-test')` в
+   защищённом endpoint, убедиться что событие появилось в Sentry,
+   убрать throw.
+5. Настроить alert-правило в Sentry: «новый issue» → Slack/email.
 
-**Время:** 30 мин.
-**Риск:** без Sentry production-ошибки видны только в логах хостинга
-— нет агрегации, нет алертов, нет stack-trace в удобной форме.
+**Время:** 15 мин.
 
 ---
 
