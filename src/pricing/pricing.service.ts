@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
@@ -20,41 +20,106 @@ export interface GeoLocation {
   region: PricingRegion;
 }
 
+// Hoisted to module scope so the inferred return type of
+// getCampaignAnalytics() is nameable from outside the file
+// (otherwise TS4053 — `Return type ... cannot be named`).
+export interface CampaignRegionAgg {
+  count: number;
+  totalRevenue: number;
+  avgPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  countries: string[];
+}
+interface CampaignRegionAggAcc extends Omit<CampaignRegionAgg, 'countries'> {
+  countries: Set<string>;
+}
+
 @Injectable()
 export class PricingService {
   private readonly logger = new Logger(PricingService.name);
-  private readonly CAMPAIGN_ID = 'launch-2026';
-  private readonly MAX_PRICE = 99;
+  private readonly CAMPAIGN_ID: string;
+  // Both override-able via env. Defaults preserve historical pricing
+  // (slot 1 = €1, slot 2 = €2, ..., capped at €99).
+  private readonly MAX_PRICE: number;
   private readonly PRICE_STEP = 1;
 
   // Redis key patterns
   private readonly COUNTER_KEY_PREFIX = 'pricing:launch:';
-  
+
   // Country to region mapping
   private readonly REGION_MAP: Record<string, PricingRegion> = {
     // EU countries
-    AT: 'EU', BE: 'EU', BG: 'EU', HR: 'EU', CY: 'EU', CZ: 'EU',
-    DK: 'EU', EE: 'EU', FI: 'EU', FR: 'EU', DE: 'EU', GR: 'EU',
-    HU: 'EU', IE: 'EU', IT: 'EU', LV: 'EU', LT: 'EU', LU: 'EU',
-    MT: 'EU', NL: 'EU', PL: 'EU', PT: 'EU', RO: 'EU', SK: 'EU',
-    SI: 'EU', ES: 'EU', SE: 'EU',
-    
+    AT: 'EU',
+    BE: 'EU',
+    BG: 'EU',
+    HR: 'EU',
+    CY: 'EU',
+    CZ: 'EU',
+    DK: 'EU',
+    EE: 'EU',
+    FI: 'EU',
+    FR: 'EU',
+    DE: 'EU',
+    GR: 'EU',
+    HU: 'EU',
+    IE: 'EU',
+    IT: 'EU',
+    LV: 'EU',
+    LT: 'EU',
+    LU: 'EU',
+    MT: 'EU',
+    NL: 'EU',
+    PL: 'EU',
+    PT: 'EU',
+    RO: 'EU',
+    SK: 'EU',
+    SI: 'EU',
+    ES: 'EU',
+    SE: 'EU',
+
     // UK
     GB: 'UK',
-    
+
     // US + Canada
-    US: 'US', CA: 'US',
-    
+    US: 'US',
+    CA: 'US',
+
     // Asia-Pacific
-    JP: 'ASIA', SG: 'ASIA', KR: 'ASIA', HK: 'ASIA', TW: 'ASIA',
-    AU: 'ASIA', NZ: 'ASIA', IN: 'ASIA', TH: 'ASIA', MY: 'ASIA',
-    PH: 'ASIA', ID: 'ASIA', VN: 'ASIA',
-    
+    JP: 'ASIA',
+    SG: 'ASIA',
+    KR: 'ASIA',
+    HK: 'ASIA',
+    TW: 'ASIA',
+    AU: 'ASIA',
+    NZ: 'ASIA',
+    IN: 'ASIA',
+    TH: 'ASIA',
+    MY: 'ASIA',
+    PH: 'ASIA',
+    ID: 'ASIA',
+    VN: 'ASIA',
+
     // Latin America
-    MX: 'LATAM', BR: 'LATAM', AR: 'LATAM', CL: 'LATAM', CO: 'LATAM',
-    PE: 'LATAM', VE: 'LATAM', EC: 'LATAM', BO: 'LATAM', PY: 'LATAM',
-    UY: 'LATAM', CR: 'LATAM', PA: 'LATAM', GT: 'LATAM', HN: 'LATAM',
-    SV: 'LATAM', NI: 'LATAM', DO: 'LATAM', CU: 'LATAM',
+    MX: 'LATAM',
+    BR: 'LATAM',
+    AR: 'LATAM',
+    CL: 'LATAM',
+    CO: 'LATAM',
+    PE: 'LATAM',
+    VE: 'LATAM',
+    EC: 'LATAM',
+    BO: 'LATAM',
+    PY: 'LATAM',
+    UY: 'LATAM',
+    CR: 'LATAM',
+    PA: 'LATAM',
+    GT: 'LATAM',
+    HN: 'LATAM',
+    SV: 'LATAM',
+    NI: 'LATAM',
+    DO: 'LATAM',
+    CU: 'LATAM',
   };
 
   constructor(
@@ -63,8 +128,17 @@ export class PricingService {
     private readonly config: ConfigService,
   ) {
     if (!this.redis) {
-      this.logger.warn('Redis not available - pricing features will use fallback mode');
+      this.logger.warn(
+        'Redis not available - pricing features will use fallback mode',
+      );
     }
+    this.CAMPAIGN_ID = this.config.get<string>(
+      'LAUNCH_CAMPAIGN_ID',
+      'launch-2026',
+    );
+    this.MAX_PRICE = Number(
+      this.config.get<string | number>('LAUNCH_MAX_PRICE', 99),
+    );
   }
 
   /**
@@ -80,7 +154,7 @@ export class PricingService {
    */
   async getCurrentPricing(region: PricingRegion): Promise<PricingInfo> {
     let slotNumber = 0;
-    
+
     if (this.redis) {
       const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
       const currentSlot = await this.redis.get(counterKey);
@@ -98,10 +172,10 @@ export class PricingService {
       });
       slotNumber = maxSlot?.slotNumber || 0;
     }
-    
+
     const currentPrice = Math.min(slotNumber + 1, this.MAX_PRICE);
     const nextPrice = Math.min(slotNumber + 2, this.MAX_PRICE);
-    
+
     return {
       region,
       currentSlot: slotNumber,
@@ -116,13 +190,20 @@ export class PricingService {
    * Get pricing info for all regions
    */
   async getAllRegionsPricing(): Promise<Record<PricingRegion, PricingInfo>> {
-    const regions: PricingRegion[] = ['EU', 'US', 'UK', 'ASIA', 'LATAM', 'OTHER'];
+    const regions: PricingRegion[] = [
+      'EU',
+      'US',
+      'UK',
+      'ASIA',
+      'LATAM',
+      'OTHER',
+    ];
     const pricingData: Record<string, PricingInfo> = {};
-    
+
     for (const region of regions) {
       pricingData[region] = await this.getCurrentPricing(region);
     }
-    
+
     return pricingData as Record<PricingRegion, PricingInfo>;
   }
 
@@ -130,9 +211,13 @@ export class PricingService {
    * Reserve a slot and get the price (atomic operation)
    * Returns the slot number and price for this purchase
    */
-  async reserveSlot(region: PricingRegion): Promise<{ slotNumber: number; price: number }> {
+  async reserveSlot(
+    region: PricingRegion,
+  ): Promise<{ slotNumber: number; price: number }> {
     if (!this.redis) {
-      this.logger.warn('Redis not available - using database fallback for slot reservation');
+      this.logger.warn(
+        'Redis not available - using database fallback for slot reservation',
+      );
 
       // The DB fallback is racy by nature (read max + return without an
       // INSERT in the same statement). We mitigate two ways:
@@ -170,7 +255,9 @@ export class PricingService {
     // Calculate price (slot 1 = €1, slot 2 = €2, etc.)
     const price = Math.min(slotNumber, this.MAX_PRICE);
 
-    this.logger.log(`Reserved slot ${slotNumber} for region ${region} at €${price}`);
+    this.logger.log(
+      `Reserved slot ${slotNumber} for region ${region} at €${price}`,
+    );
 
     return { slotNumber, price };
   }
@@ -268,39 +355,53 @@ export class PricingService {
       orderBy: { createdAt: 'asc' },
     });
 
-    // Group by region
-    const byRegion = purchases.reduce((acc, p) => {
-      if (!acc[p.region]) {
-        acc[p.region] = {
-          count: 0,
-          totalRevenue: 0,
-          avgPrice: 0,
-          minPrice: Infinity,
-          maxPrice: 0,
-          countries: new Set<string>(),
-        };
-      }
-      
-      acc[p.region].count++;
-      acc[p.region].totalRevenue += p.priceEur;
-      acc[p.region].minPrice = Math.min(acc[p.region].minPrice, p.priceEur);
-      acc[p.region].maxPrice = Math.max(acc[p.region].maxPrice, p.priceEur);
-      if (p.country) acc[p.region].countries.add(p.country);
-      
-      return acc;
-    }, {} as Record<string, any>);
+    // Group by region. Accumulator uses Set<string> for de-duped country
+    // tracking; the returned shape converts to a plain string[] so the
+    // JSON response is well-formed. Types live at module scope (see
+    // CampaignRegionAgg) so callers can name the return type.
+    const byRegionAcc = purchases.reduce<Record<string, CampaignRegionAggAcc>>(
+      (acc, p) => {
+        if (!acc[p.region]) {
+          acc[p.region] = {
+            count: 0,
+            totalRevenue: 0,
+            avgPrice: 0,
+            minPrice: Infinity,
+            maxPrice: 0,
+            countries: new Set<string>(),
+          };
+        }
 
-    // Calculate averages
-    Object.keys(byRegion).forEach(region => {
-      byRegion[region].avgPrice = byRegion[region].totalRevenue / byRegion[region].count;
-      byRegion[region].countries = Array.from(byRegion[region].countries);
-    });
+        const bucket = acc[p.region];
+        bucket.count++;
+        bucket.totalRevenue += p.priceEur;
+        bucket.minPrice = Math.min(bucket.minPrice, p.priceEur);
+        bucket.maxPrice = Math.max(bucket.maxPrice, p.priceEur);
+        if (p.country) bucket.countries.add(p.country);
+
+        return acc;
+      },
+      {},
+    );
+
+    // Finalise: compute avg + freeze Set into array.
+    const byRegion: Record<string, CampaignRegionAgg> = {};
+    for (const [region, bucket] of Object.entries(byRegionAcc)) {
+      byRegion[region] = {
+        count: bucket.count,
+        totalRevenue: bucket.totalRevenue,
+        avgPrice: bucket.totalRevenue / bucket.count,
+        minPrice: bucket.minPrice,
+        maxPrice: bucket.maxPrice,
+        countries: Array.from(bucket.countries),
+      };
+    }
 
     return {
       totalPurchases: purchases.length,
       totalRevenue: purchases.reduce((sum, p) => sum + p.priceEur, 0),
       byRegion,
-      timeline: purchases.map(p => ({
+      timeline: purchases.map((p) => ({
         timestamp: p.createdAt,
         region: p.region,
         price: p.priceEur,
@@ -317,14 +418,21 @@ export class PricingService {
       this.logger.warn('Redis not available - cannot reset counters');
       return;
     }
-    
-    const regions: PricingRegion[] = ['EU', 'US', 'UK', 'ASIA', 'LATAM', 'OTHER'];
-    
+
+    const regions: PricingRegion[] = [
+      'EU',
+      'US',
+      'UK',
+      'ASIA',
+      'LATAM',
+      'OTHER',
+    ];
+
     for (const region of regions) {
       const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
       await this.redis.del(counterKey);
     }
-    
+
     this.logger.warn('All pricing counters have been reset');
   }
 
@@ -336,9 +444,16 @@ export class PricingService {
       this.logger.warn('Redis not available - cannot initialize counters');
       return;
     }
-    
-    const regions: PricingRegion[] = ['EU', 'US', 'UK', 'ASIA', 'LATAM', 'OTHER'];
-    
+
+    const regions: PricingRegion[] = [
+      'EU',
+      'US',
+      'UK',
+      'ASIA',
+      'LATAM',
+      'OTHER',
+    ];
+
     for (const region of regions) {
       const maxSlot = await this.prisma.launchPurchase.findFirst({
         where: {
@@ -353,7 +468,9 @@ export class PricingService {
       if (maxSlot) {
         const counterKey = `${this.COUNTER_KEY_PREFIX}${region}`;
         await this.redis.set(counterKey, maxSlot.slotNumber);
-        this.logger.log(`Initialized ${region} counter to ${maxSlot.slotNumber}`);
+        this.logger.log(
+          `Initialized ${region} counter to ${maxSlot.slotNumber}`,
+        );
       }
     }
   }

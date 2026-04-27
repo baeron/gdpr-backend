@@ -23,6 +23,7 @@ import { BrowserManagerService } from './browser-manager.service';
 import { IssueGeneratorService } from './issue-generator.service';
 import { ScoreCalculatorService } from './score-calculator.service';
 import { UrlUtilsService } from './url-utils.service';
+import { SCAN_TIMEOUT_MS } from './scanner.config';
 
 @Injectable()
 export class ScannerService {
@@ -62,10 +63,12 @@ export class ScannerService {
     this.cookieAnalyzer = cookieAnalyzer ?? new CookieAnalyzer();
     this.trackerAnalyzer = trackerAnalyzer ?? new TrackerAnalyzer();
     this.consentAnalyzer = consentAnalyzer ?? new ConsentAnalyzer();
-    this.privacyPolicyAnalyzer = privacyPolicyAnalyzer ?? new PrivacyPolicyAnalyzer();
+    this.privacyPolicyAnalyzer =
+      privacyPolicyAnalyzer ?? new PrivacyPolicyAnalyzer();
     this.securityAnalyzer = securityAnalyzer ?? new SecurityAnalyzer();
     this.formAnalyzer = formAnalyzer ?? new FormAnalyzer();
-    this.dataTransferAnalyzer = dataTransferAnalyzer ?? new DataTransferAnalyzer();
+    this.dataTransferAnalyzer =
+      dataTransferAnalyzer ?? new DataTransferAnalyzer();
     this.technologyAnalyzer = technologyAnalyzer ?? new TechnologyAnalyzer();
     this.headersAnalyzer = headersAnalyzer ?? new HeadersAnalyzer();
     this.sslAnalyzer = sslAnalyzer ?? new SslAnalyzer();
@@ -75,7 +78,8 @@ export class ScannerService {
     this.urlUtils = urlUtils ?? new UrlUtilsService();
   }
 
-  private readonly SCAN_TIMEOUT_MS = 120_000; // 2 minutes max per scan
+  // Override via SCAN_TIMEOUT_MS env var. Default 120s = 2min.
+  private readonly scanTimeoutMs = SCAN_TIMEOUT_MS;
 
   async scanWebsite(url: string, retryCount = 0): Promise<ScanResultDto> {
     const startTime = Date.now();
@@ -84,16 +88,25 @@ export class ScannerService {
     // Timeout protection: abort scan if it takes too long
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Scan timed out after ${this.SCAN_TIMEOUT_MS / 1000}s`)),
-        this.SCAN_TIMEOUT_MS,
+        () =>
+          reject(
+            new Error(`Scan timed out after ${this.scanTimeoutMs / 1000}s`),
+          ),
+        this.scanTimeoutMs,
       ),
     );
 
-    return Promise.race([this.executeScan(url, retryCount, startTime), timeoutPromise]);
+    return Promise.race([
+      this.executeScan(url, retryCount, startTime),
+      timeoutPromise,
+    ]);
   }
 
-  private async executeScan(url: string, retryCount: number, startTime: number): Promise<ScanResultDto> {
-
+  private async executeScan(
+    url: string,
+    retryCount: number,
+    startTime: number,
+  ): Promise<ScanResultDto> {
     // Normalize URL
     const normalizedUrl = this.urlUtils.normalizeUrl(url);
 
@@ -281,7 +294,8 @@ export class ScannerService {
       );
 
       // Calculate overall risk level and score
-      const overallRiskLevel = this.scoreCalculator.calculateOverallRisk(issues);
+      const overallRiskLevel =
+        this.scoreCalculator.calculateOverallRisk(issues);
       const score = this.scoreCalculator.calculateScore(issues);
 
       const scanDurationMs = Date.now() - startTime;
@@ -382,8 +396,14 @@ export class ScannerService {
     dataTransfers: DataTransferInfo,
   ): import('./dto/scan-result.dto').ScanIssue[] {
     return this.issueGenerator.generateIssues(
-      cookies, trackers, thirdPartyRequests, consentBanner,
-      privacyPolicy, security, forms, dataTransfers,
+      cookies,
+      trackers,
+      thirdPartyRequests,
+      consentBanner,
+      privacyPolicy,
+      security,
+      forms,
+      dataTransfers,
     );
   }
 

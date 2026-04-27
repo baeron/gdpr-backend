@@ -82,7 +82,7 @@ git push --force --tags
 
 ## 🟡 Важно (1–2 спринта)
 
-### 3. Sentry DSN в production ✅ КОД ГОТОВ — нужен только DSN
+### 3. Sentry DSN в production ✅ DSN ЗАДЕПЛОЕН — остался smoke-test
 
 **Сделано в коде:**
 
@@ -97,22 +97,31 @@ git push --force --tags
 - `Sentry.close(2000)` на SIGTERM/SIGINT в обоих процессах
 - Startup warning если `SENTRY_DSN` пустой в production
 
-**Что осталось (ручные действия):**
+**Сделано (ops, 2026-04-27):**
 
-1. Создать проект на [sentry.io](https://sentry.io) (бесплатный
-   план — 5k events/мес, нам с запасом).
-2. Project Settings → Client Keys → скопировать DSN.
-3. Добавить в production env (Vultr / Cloud Run):
-   ```
-   SENTRY_DSN=https://xxxxxxxx@o0.ingest.sentry.io/0000000
-   ```
-   Опционально: `SENTRY_TRACES_SAMPLE_RATE` (default 0.1).
-4. Smoke-test: бросить `throw new Error('sentry-smoke-test')` в
-   защищённом endpoint, убедиться что событие появилось в Sentry,
-   убрать throw.
-5. Настроить alert-правило в Sentry: «новый issue» → Slack/email.
+- ✅ Создан проект `gdpr-backend` в Sentry (org `policytracker`,
+  регион EU — `o4511292363767808.ingest.de.sentry.io`)
+- ✅ `SENTRY_DSN` добавлен в production env (API + worker)
+- ✅ Передеплой прошёл успешно
+- ✅ Alert rule настроен через мастер: «high priority issues,
+  > 10 occurrences / 1 min» → email
 
-**Время:** 15 мин.
+**Осталось (когда будет время):**
+
+1. Smoke-test — убедиться что events реально приходят:
+   - Вариант А (быстро): попросить Cascade добавить временный
+     endpoint `/api/v1/debug/sentry-test` который кидает
+     `throw new Error('sentry-smoke-test')`, дёрнуть curl-ом,
+     проверить в Sentry → Issues, убрать endpoint вторым коммитом.
+   - Вариант Б (пассивно): дождаться первой реальной 5xx — она
+     прилетит сама. Проверить что в issue есть тэг
+     `release: gdpr-backend@<version>`.
+2. Опционально: подключить Slack-нотификации (Sentry → Alerts →
+   Integrations → Slack) если email не удобен.
+
+**Риск отложить smoke-test:** низкий. Если DSN ошибочный — Sentry
+SDK молча no-op'ит, а в startup-логах нет warning'а (warning
+выводится только если DSN **пустой**). Лучше проверить.
 
 ---
 
@@ -222,16 +231,22 @@ swap. На Cloud Run — встроено.
 
 ---
 
-### 11. Hardcoded бизнес-константы → ENV
+### 11. Hardcoded бизнес-константы → ENV ✅ СДЕЛАНО (2026-04-27)
 
-Из § 14 отчёта:
+Из § 14 отчёта — все вынесены в env с дефолтами, идентичными
+прежним хардкод-значениям:
 
-- `MAX_PRICE = 99` (`src/pricing/pricing.service.ts`)
-- `SCAN_TIMEOUT_MS = 120_000` (`src/scanner/scanner.service.ts`)
-- Rate limits в `src/scanner/scanner.controller.ts`
+- `LAUNCH_MAX_PRICE` (default 99) — `src/pricing/pricing.service.ts`
+  через `ConfigService`
+- `LAUNCH_CAMPAIGN_ID` (default `launch-2026`) — там же
+- `SCAN_TIMEOUT_MS` (default 120000) — `src/scanner/scanner.service.ts`
+- `SCAN_RATE_*` / `SCAN_QUEUE_*` (8 переменных) — per-route rate
+  limits в `src/scanner/scanner.controller.ts` через
+  `src/scanner/scanner.config.ts` (модуль читает env при старте,
+  декораторы подставляют значения)
 
-Вынести в `ConfigModule` с дефолтами. Не критично, но позволит
-тюнить на production без ребилда.
+Все переменные задокументированы в `.env.example`. Тюнинг на
+production теперь не требует ребилда.
 
 ---
 

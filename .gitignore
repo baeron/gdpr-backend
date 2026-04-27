@@ -36,3 +36,12 @@ coverage
 
 # Load test results (keep .gitkeep)
 tests/load/results/*.json
+
+# Internal planning / deployment notes that MAY contain secrets
+# (DEPLOYMENT.md snapshots production env vars incl. live Stripe keys).
+# Keep these local-only. If you need to share, scrub secrets first and
+# move the sanitised version into docs/.
+DEPLOYMENT.md
+MARKET_ANALYSIS.md
+NEW_PLAN.md
+PLAN.md

@@ -17,6 +17,7 @@ import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
 import { Idempotent } from '../common/idempotency/idempotency.interceptor';
 import type { Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { SCAN_RATE_LIMITS } from './scanner.config';
 import {
   ApiTags,
   ApiOperation,
@@ -150,7 +151,19 @@ export class ScannerController {
     @Inject(QUEUE_SERVICE) private readonly queueService: IQueueService,
   ) {}
 
-  @Throttle({ short: { ttl: 60000, limit: 3 }, medium: { ttl: 3600000, limit: 20 } })
+  // Limits configurable via SCAN_RATE_* env vars (see scanner.config.ts).
+  // Defaults: 3 / minute, 20 / hour per IP — synchronous scan is
+  // expensive (Playwright + network), so the cap is intentionally low.
+  @Throttle({
+    short: {
+      ttl: SCAN_RATE_LIMITS.scan.shortTtl,
+      limit: SCAN_RATE_LIMITS.scan.shortLimit,
+    },
+    medium: {
+      ttl: SCAN_RATE_LIMITS.scan.mediumTtl,
+      limit: SCAN_RATE_LIMITS.scan.mediumLimit,
+    },
+  })
   @UseGuards(TurnstileGuard)
   @Post('scan')
   @ApiOperation({
@@ -198,10 +211,14 @@ Performs a comprehensive GDPR compliance scan on the specified website.
 
     const validation = await this.urlUtils.validateAndCheckUrl(body.websiteUrl);
     if (!validation.isValid) {
-      throw new BadRequestException(validation.error || 'Invalid URL provided.');
+      throw new BadRequestException(
+        validation.error || 'Invalid URL provided.',
+      );
     }
 
-    const result = await this.scannerService.scanWebsite(validation.normalizedUrl);
+    const result = await this.scannerService.scanWebsite(
+      validation.normalizedUrl,
+    );
 
     // Optionally save to database
     if (body.saveToDb !== false) {
@@ -321,7 +338,19 @@ Performs a comprehensive GDPR compliance scan on the specified website.
 
   // ============ ASYNC QUEUE ENDPOINTS ============
 
-  @Throttle({ short: { ttl: 60000, limit: 5 }, medium: { ttl: 3600000, limit: 30 } })
+  // Limits configurable via SCAN_QUEUE_* env vars. Defaults:
+  // 5 / minute, 30 / hour — slightly higher than the sync /scan
+  // endpoint because enqueueing is cheap (just a DB insert).
+  @Throttle({
+    short: {
+      ttl: SCAN_RATE_LIMITS.queue.shortTtl,
+      limit: SCAN_RATE_LIMITS.queue.shortLimit,
+    },
+    medium: {
+      ttl: SCAN_RATE_LIMITS.queue.mediumTtl,
+      limit: SCAN_RATE_LIMITS.queue.mediumLimit,
+    },
+  })
   @UseGuards(TurnstileGuard)
   @Idempotent()
   @Post('queue')
@@ -357,18 +386,20 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
   })
   async queueScan(@Body() body: QueueScanRequestDto, @Req() request: Request) {
     this.logger.log(`Queueing scan for: ${body.websiteUrl}`);
-    
+
     const validation = await this.urlUtils.validateAndCheckUrl(body.websiteUrl);
     if (!validation.isValid) {
-      throw new BadRequestException(validation.error || 'Invalid URL provided.');
+      throw new BadRequestException(
+        validation.error || 'Invalid URL provided.',
+      );
     }
 
     body.websiteUrl = validation.normalizedUrl;
-    
+
     // Pass client IP to queue service
     return this.queueService.addJob({
       ...body,
-      clientIp: request.ip
+      clientIp: request.ip,
     });
   }
 
