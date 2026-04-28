@@ -76,16 +76,17 @@ services:
     container_name: gdpr-api
     restart: unless-stopped
     profiles: ['default', 'postgres']
+    env_file:
+      - .env.production
     environment:
-      NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
+      REDIS_URL: redis://redis:6379
       PORT: 3000
       RESEND_API_KEY: ${RESEND_API_KEY}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # Queue configuration
       QUEUE_TYPE: ${QUEUE_TYPE:-postgres} # postgres | redis
-      REDIS_URL: redis://redis:6379
       # Worker mode: api runs scanner inline when QUEUE_TYPE=postgres
       WORKER_ENABLED: '${WORKER_ENABLED:-true}'
     ports:
@@ -120,15 +121,12 @@ services:
     container_name: gdpr-api-redis
     restart: unless-stopped
     profiles: ['redis']
+    env_file:
+      - .env.production
     environment:
-      NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
-      PORT: 3000
-      RESEND_API_KEY: ${RESEND_API_KEY}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
+      QUEUE_TYPE: redis
       WORKER_ENABLED: 'true'
     ports:
       - '127.0.0.1:3000:3000'
@@ -164,8 +162,9 @@ services:
     container_name: gdpr-worker
     restart: unless-stopped
     profiles: ['scaled']
+    env_file:
+      - .env.production
     environment:
-      NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
