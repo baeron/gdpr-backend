@@ -1,8 +1,12 @@
-import { ScannerController, ScanRequestDto, QueueScanRequestDto } from './scanner.controller';
+import {
+  ScannerController,
+  ScanRequestDto,
+  QueueScanRequestDto,
+} from './scanner.controller';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
 import { IQueueService } from './queue/queue.interface';
-import { RiskLevel, ScanResultDto } from './dto/scan-result.dto';
+import { AuditService } from '../audit/audit.service';
 
 import { UrlUtilsService } from './url-utils.service';
 
@@ -12,47 +16,7 @@ describe('ScannerController', () => {
   let mockReportService: Partial<ScannerReportService>;
   let mockQueueService: Partial<IQueueService>;
   let mockUrlUtils: Partial<UrlUtilsService>;
-
-  const mockScanResult: ScanResultDto = {
-    websiteUrl: 'https://example.com',
-    scanDate: new Date(),
-    scanDurationMs: 5000,
-    overallRiskLevel: RiskLevel.MEDIUM,
-    score: 65,
-    cookies: { total: 0, beforeConsent: 0, list: [] },
-    trackers: { total: 0, beforeConsent: 0, list: [] },
-    thirdPartyRequests: { total: 0, beforeConsent: 0, list: [] },
-    consentBanner: {
-      found: true, hasRejectButton: true, hasAcceptButton: true, hasSettingsOption: true, isBlocking: false,
-      quality: { hasPreCheckedBoxes: false, preCheckedCategories: [], hasEqualProminence: true, acceptButtonSize: null, rejectButtonSize: null, isCookieWall: false, hasGranularConsent: true, categoryCount: 0, closeButtonRejects: null },
-      tcf: { detected: false, version: null, cmpId: null, cmpVersion: null, gdprApplies: null, purposeConsents: [], vendorConsents: [] },
-    },
-    privacyPolicy: {
-      found: true, url: 'https://example.com/privacy',
-      content: { analyzed: true, hasDataController: true, hasDPOContact: true, hasPurposeOfProcessing: true, hasLegalBasis: true, hasDataRetention: true, hasUserRights: true, hasRightToComplain: true, hasThirdPartySharing: true, hasInternationalTransfers: true, detectedElements: [], missingElements: [] },
-    },
-    security: {
-      https: { enabled: true, redirectsToHttps: true },
-      mixedContent: { found: false, resources: [] },
-      cookieSecurity: { withoutSecure: 0, withoutHttpOnly: 0, withoutSameSite: 0, excessiveExpiration: 0, issues: [] },
-    },
-    securityHeaders: {
-      headers: {}, csp: { present: true, value: "default-src 'self'", hasDefaultSrc: true, hasScriptSrc: false, hasUnsafeInline: false, hasUnsafeEval: false },
-      hsts: { present: true, value: 'max-age=31536000', maxAge: 31536000, includesSubDomains: false, preload: false },
-      xFrameOptions: { present: true, value: 'DENY' }, xContentTypeOptions: { present: true, value: 'nosniff' },
-      referrerPolicy: { present: true, value: 'strict-origin' }, permissionsPolicy: { present: false, value: null },
-      missingHeaders: [], score: 85,
-    },
-    sslCertificate: {
-      valid: true, issuer: "Let's Encrypt", subject: 'example.com',
-      validFrom: '2025-01-01', validTo: '2026-06-01', daysUntilExpiry: 150,
-      protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384', keyExchange: null, selfSigned: false, error: null,
-    },
-    forms: { totalForms: 0, dataCollectionForms: 0, formsWithConsent: 0, formsWithoutConsent: 0, formsWithPreCheckedMarketing: 0, formsWithPrivacyLink: 0, forms: [], pagesScanned: [] },
-    dataTransfers: { usServicesDetected: [], totalUSServices: 0, highRiskTransfers: [] },
-    technologies: { technologies: [], cms: null, framework: null, consentPlatform: null, analytics: [], advertising: [], cdn: null },
-    issues: [],
-  };
+  let mockAuditService: Partial<AuditService>;
 
   beforeEach(() => {
     mockScannerService = {
@@ -60,25 +24,51 @@ describe('ScannerController', () => {
     };
     mockReportService = {
       saveScanResult: jest.fn().mockResolvedValue('report-123'),
-      getReport: jest.fn().mockResolvedValue({ id: 'report-123', websiteUrl: 'https://example.com' }),
+      getReport: jest.fn().mockResolvedValue({
+        id: 'report-123',
+        websiteUrl: 'https://example.com',
+      }),
       getReportsByWebsite: jest.fn().mockResolvedValue([]),
-      updateIssueStatus: jest.fn().mockResolvedValue({ id: 'issue-1', status: 'RESOLVED' }),
+      updateIssueStatus: jest
+        .fn()
+        .mockResolvedValue({ id: 'issue-1', status: 'RESOLVED' }),
     };
     mockQueueService = {
-      addJob: jest.fn().mockResolvedValue({ id: 'job-1', status: 'QUEUED', position: 1 }),
-      getJobStatus: jest.fn().mockResolvedValue({ id: 'job-1', status: 'PROCESSING', progress: 50 }),
+      addJob: jest
+        .fn()
+        .mockResolvedValue({ id: 'job-1', status: 'QUEUED', position: 1 }),
+      getJobStatus: jest
+        .fn()
+        .mockResolvedValue({ id: 'job-1', status: 'PROCESSING', progress: 50 }),
       cancelJob: jest.fn().mockResolvedValue(true),
       retryJob: jest.fn().mockResolvedValue(true),
-      getStats: jest.fn().mockResolvedValue({ queued: 2, processing: 1, completed: 10, failed: 0 }),
+      getStats: jest.fn().mockResolvedValue({
+        queued: 2,
+        processing: 1,
+        completed: 10,
+        failed: 0,
+      }),
     };
     mockUrlUtils = {
-      validateAndCheckUrl: jest.fn().mockImplementation((url) => Promise.resolve({ isValid: true, normalizedUrl: url }))
+      validateAndCheckUrl: jest
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve({ isValid: true, normalizedUrl: url }),
+        ) as UrlUtilsService['validateAndCheckUrl'],
+    };
+    mockAuditService = {
+      createAuditRequest: jest.fn().mockResolvedValue({
+        success: true,
+        message: 'Audit request submitted successfully.',
+        auditId: 'audit-from-queue',
+      }),
     };
     controller = new ScannerController(
       mockScannerService as ScannerService,
       mockReportService as ScannerReportService,
       mockUrlUtils as UrlUtilsService,
       mockQueueService as IQueueService,
+      mockAuditService as AuditService,
     );
   });
 
@@ -86,23 +76,32 @@ describe('ScannerController', () => {
     it('should scan and save to DB by default', async () => {
       const body: ScanRequestDto = { websiteUrl: 'https://example.com' };
       const result = await controller.scanWebsite(body);
-      expect(mockScannerService.scanWebsite).toHaveBeenCalledWith('https://example.com');
+      expect(mockScannerService.scanWebsite).toHaveBeenCalledWith(
+        'https://example.com',
+      );
       expect(mockReportService.saveScanResult).toHaveBeenCalled();
       expect(result).toHaveProperty('reportId', 'report-123');
     });
 
     it('should skip DB save when saveToDb is false', async () => {
-      const body: ScanRequestDto = { websiteUrl: 'https://example.com', saveToDb: false };
+      const body: ScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        saveToDb: false,
+      };
       const result = await controller.scanWebsite(body);
       expect(mockReportService.saveScanResult).not.toHaveBeenCalled();
       expect(result).not.toHaveProperty('reportId');
     });
 
     it('should pass auditRequestId to saveScanResult', async () => {
-      const body: ScanRequestDto = { websiteUrl: 'https://example.com', auditRequestId: 'audit-1' };
+      const body: ScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        auditRequestId: 'audit-1',
+      };
       await controller.scanWebsite(body);
       expect(mockReportService.saveScanResult).toHaveBeenCalledWith(
-        expect.anything(), 'audit-1',
+        expect.anything(),
+        'audit-1',
       );
     });
   });
@@ -118,34 +117,127 @@ describe('ScannerController', () => {
   describe('getReportsByWebsite', () => {
     it('should fetch reports with default limit', async () => {
       await controller.getReportsByWebsite('example.com');
-      expect(mockReportService.getReportsByWebsite).toHaveBeenCalledWith('example.com', 10);
+      expect(mockReportService.getReportsByWebsite).toHaveBeenCalledWith(
+        'example.com',
+        10,
+      );
     });
 
     it('should parse custom limit', async () => {
       await controller.getReportsByWebsite('example.com', '5');
-      expect(mockReportService.getReportsByWebsite).toHaveBeenCalledWith('example.com', 5);
+      expect(mockReportService.getReportsByWebsite).toHaveBeenCalledWith(
+        'example.com',
+        5,
+      );
     });
   });
 
   describe('updateIssueStatus', () => {
     it('should update issue status', async () => {
-      const result = await controller.updateIssueStatus('issue-1', { status: 'RESOLVED' });
-      expect(mockReportService.updateIssueStatus).toHaveBeenCalledWith('issue-1', 'RESOLVED');
+      const result = await controller.updateIssueStatus('issue-1', {
+        status: 'RESOLVED',
+      });
+      expect(mockReportService.updateIssueStatus).toHaveBeenCalledWith(
+        'issue-1',
+        'RESOLVED',
+      );
       expect(result).toHaveProperty('status', 'RESOLVED');
     });
   });
 
   describe('queueScan', () => {
-    it('should queue a scan job', async () => {
+    const requestMock = { ip: '127.0.0.1' } as unknown as Parameters<
+      ScannerController['queueScan']
+    >[1];
+
+    it('queues a job without creating an AuditRequest when no email/consent is supplied', async () => {
       const body: QueueScanRequestDto = { websiteUrl: 'https://example.com' };
-      const requestMock = { ip: '127.0.0.1' } as any;
-      
+
       const result = await controller.queueScan(body, requestMock);
+
+      expect(mockAuditService.createAuditRequest).not.toHaveBeenCalled();
       expect(mockQueueService.addJob).toHaveBeenCalledWith({
-        ...body,
-        clientIp: '127.0.0.1'
+        websiteUrl: 'https://example.com',
+        auditRequestId: undefined,
+        userEmail: undefined,
+        locale: undefined,
+        priority: undefined,
+        clientIp: '127.0.0.1',
       });
       expect(result).toHaveProperty('status', 'QUEUED');
+    });
+
+    it('creates an AuditRequest and links it to the queue job when email + agreeScan present', async () => {
+      const body: QueueScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        userEmail: 'user@example.com',
+        agreeScan: true,
+        agreeMarketing: true,
+        locale: 'en',
+      };
+
+      await controller.queueScan(body, requestMock);
+
+      expect(mockAuditService.createAuditRequest).toHaveBeenCalledWith({
+        websiteUrl: 'https://example.com',
+        email: 'user@example.com',
+        agreeScan: true,
+        agreeMarketing: true,
+        locale: 'en',
+      });
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auditRequestId: 'audit-from-queue',
+          userEmail: 'user@example.com',
+        }),
+      );
+    });
+
+    it('defaults agreeMarketing to false when omitted', async () => {
+      const body: QueueScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        userEmail: 'user@example.com',
+        agreeScan: true,
+      };
+
+      await controller.queueScan(body, requestMock);
+
+      expect(mockAuditService.createAuditRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ agreeMarketing: false }),
+      );
+    });
+
+    it('reuses caller-supplied auditRequestId without creating a new AuditRequest', async () => {
+      const body: QueueScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        userEmail: 'user@example.com',
+        agreeScan: true,
+        auditRequestId: 'pre-existing-audit',
+      };
+
+      await controller.queueScan(body, requestMock);
+
+      expect(mockAuditService.createAuditRequest).not.toHaveBeenCalled();
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.objectContaining({ auditRequestId: 'pre-existing-audit' }),
+      );
+    });
+
+    it('skips AuditRequest creation when email is provided but agreeScan is missing', async () => {
+      // Validation layer (class-validator @Equals(true)) normally rejects this
+      // shape before it reaches the handler; this guards against direct calls
+      // bypassing the pipe (e.g. internal callers).
+      const body: QueueScanRequestDto = {
+        websiteUrl: 'https://example.com',
+        userEmail: 'user@example.com',
+      };
+
+      await controller.queueScan(body, requestMock);
+
+      expect(mockAuditService.createAuditRequest).not.toHaveBeenCalled();
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.objectContaining({ auditRequestId: undefined }),
+      );
     });
   });
 

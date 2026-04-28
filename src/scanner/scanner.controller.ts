@@ -32,6 +32,7 @@ import {
   IsBoolean,
   IsNumber,
   IsEmail,
+  Equals,
 } from 'class-validator';
 import { ScannerService } from './scanner.service';
 import { ScannerReportService } from './scanner-report.service';
@@ -39,6 +40,7 @@ import { UrlUtilsService } from './url-utils.service';
 import { QUEUE_SERVICE } from './queue/queue.interface';
 import type { IQueueService } from './queue/queue.interface';
 import { ScanResultDto } from './dto/scan-result.dto';
+import { AuditService } from '../audit/audit.service';
 
 export class ScanRequestDto {
   @ApiProperty({
@@ -96,7 +98,12 @@ export class QueueScanRequestDto {
   websiteUrl: string;
 
   @ApiProperty({
-    description: 'Link to existing audit request ID',
+    description:
+      'Link to a pre-existing AuditRequest row. When provided, the queue\n' +
+      'handler skips its own AuditRequest creation and just attaches the\n' +
+      'job to that row. Used by flows that already created the audit\n' +
+      'request via POST /audit (deprecated for hero-form, kept for\n' +
+      'standalone audit submissions).',
     required: false,
   })
   @IsOptional()
@@ -131,6 +138,32 @@ export class QueueScanRequestDto {
 
   @ApiProperty({
     description:
+      'GDPR consent: user agrees that their website may be scanned.\n' +
+      'Required to be `true` when `userEmail` is supplied — the queue\n' +
+      'handler creates an AuditRequest row carrying this consent flag,\n' +
+      'which is the GDPR-compliant proof of permission.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Equals(true, {
+    message: 'You must agree to have your website scanned (agreeScan=true).',
+  })
+  agreeScan?: boolean;
+
+  @ApiProperty({
+    description:
+      'Optional opt-in for marketing emails. Stored on the AuditRequest\n' +
+      'row alongside `agreeScan`. Defaults to false when omitted.',
+    required: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  agreeMarketing?: boolean;
+
+  @ApiProperty({
+    description:
       'Cloudflare Turnstile token (verified server-side via siteverify)',
     required: false,
   })
@@ -149,6 +182,7 @@ export class ScannerController {
     private readonly reportService: ScannerReportService,
     private readonly urlUtils: UrlUtilsService,
     @Inject(QUEUE_SERVICE) private readonly queueService: IQueueService,
+    private readonly auditService: AuditService,
   ) {}
 
   // Limits configurable via SCAN_RATE_* env vars (see scanner.config.ts).
@@ -396,9 +430,51 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
 
     body.websiteUrl = validation.normalizedUrl;
 
-    // Pass client IP to queue service
+    // GDPR consent flow:
+    //
+    // The hero-form on the frontend collects email + agreeScan + agreeMarketing
+    // and submits everything to /scanner/queue in a single request. We record
+    // the AuditRequest row here so the consent flags land in the database
+    // BEFORE the scan starts.
+    //
+    // Why not let the frontend POST /audit separately first?
+    //   - Single-use Turnstile tokens: one captcha solve = one siteverify = one
+    //     POST. A second call to /audit would either need a second captcha
+    //     (bad UX, second widget on the page) or would be sent without one
+    //     (rejected by TurnstileGuard with 403). The old two-call pattern was
+    //     silently failing in production until we caught it via the deploy
+    //     to Contabo.
+    //   - Atomicity: consent + scan request are conceptually one user action.
+    //     Splitting them across two endpoints leaves room for half-recorded
+    //     state if the second call fails.
+    //
+    // Backwards-compat: callers that still want the old two-call flow can
+    // pre-create the AuditRequest via POST /audit and pass `auditRequestId`
+    // here. In that case we trust the existing row and don't create a new one.
+    let auditRequestId = body.auditRequestId;
+    if (!auditRequestId && body.userEmail && body.agreeScan) {
+      const audit = await this.auditService.createAuditRequest({
+        websiteUrl: body.websiteUrl,
+        email: body.userEmail,
+        agreeScan: body.agreeScan,
+        agreeMarketing: body.agreeMarketing ?? false,
+        locale: body.locale,
+      });
+      auditRequestId = audit.auditId;
+      this.logger.log(
+        `Created AuditRequest ${auditRequestId} for queued scan ` +
+          `(email=${body.userEmail}, agreeMarketing=${
+            body.agreeMarketing ?? false
+          })`,
+      );
+    }
+
     return this.queueService.addJob({
-      ...body,
+      websiteUrl: body.websiteUrl,
+      auditRequestId,
+      userEmail: body.userEmail,
+      locale: body.locale,
+      priority: body.priority,
       clientIp: request.ip,
     });
   }

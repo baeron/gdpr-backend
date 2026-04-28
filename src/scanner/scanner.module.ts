@@ -24,6 +24,7 @@ import { HeadersAnalyzer } from './analyzers/headers.analyzer';
 import { SslAnalyzer } from './analyzers/ssl.analyzer';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditModule } from '../audit/audit.module';
 import { QUEUE_SERVICE } from './queue/queue.interface';
 import type { IQueueService } from './queue/queue.interface';
 import { PostgresQueueService } from './queue/postgres-queue.service';
@@ -63,7 +64,7 @@ const queueProvider = {
 };
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AuditModule],
   controllers: [ScannerController],
   providers: [
     CookieAnalyzer,
