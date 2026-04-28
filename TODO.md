@@ -1,9 +1,22 @@
 # Backend — оставшиеся задачи
 
-Снимок на **2026-04-26** после серии коммитов `4e5ea59…c4c28d6`.
-Базовый отчёт: `BACKEND_DUE_DILIGENCE.md`. Все автоматизируемые
-пункты из таблицы техдолга (Section 13) закрыты — здесь только то,
-что требует ручных действий или относится к long-term.
+Снимок на **2026-04-28** после серии коммитов `4e5ea59…a4ab7db` +
+deploy на Contabo. Базовый отчёт: `BACKEND_DUE_DILIGENCE.md`.
+Deploy playbook: `DEPLOY.md`. Все автоматизируемые пункты из таблицы
+техдолга (Section 13) закрыты — здесь только то, что требует ручных
+действий или относится к long-term.
+
+## 🟢 Production deploy — done (2026-04-28)
+
+- Инстанс: **Contabo 167.86.116.58** (Ubuntu 24.04, 4 CPU, 8 GB RAM)
+- Домен: **https://api.policytracker.eu** (Let's Encrypt, auto-renew)
+- Стек: `postgres:16-alpine` + `redis:7-alpine` + NestJS API
+  (Redis/Bull queue, worker inline)
+- Swap 4 GB, UFW (22/80/443), nginx + certbot установлены на хост
+- `/api/v1/health` 200, `/api/v1/pricing/current` работает,
+  geo-IP детектит регион корректно
+- Smoke-проверка SSL: issuer Let's Encrypt E8, valid до 2026-07-27
+- Prisma миграции применились автоматически при старте контейнера
 
 Условные обозначения:
 

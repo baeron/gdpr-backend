@@ -3,7 +3,7 @@ version: '3.8'
 # ============================================================
 # GDPR Audit - Docker Compose
 # ============================================================
-# 
+#
 # PROFILES:
 #   - default: API + PostgreSQL (PostgreSQL queue)
 #   - redis:   API + PostgreSQL + Redis (Bull queue)
@@ -34,9 +34,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"
+      - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gdpr} -d ${POSTGRES_DB:-gdpr_audit}"]
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-gdpr} -d ${POSTGRES_DB:-gdpr_audit}',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,14 +50,18 @@ services:
     image: redis:7-alpine
     container_name: gdpr-redis
     restart: unless-stopped
-    profiles: ["redis", "scaled"]
-    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    profiles: ['redis', 'scaled']
+    # maxmemory-policy MUST be `noeviction` for Bull/BullMQ — any other
+    # policy allows Redis to evict pending job keys under memory pressure,
+    # silently dropping queued scans. 64mb cap is plenty for queue metadata
+    # (Bull keeps job payloads small); bump if you start seeing OOM.
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - '127.0.0.1:6379:6379'
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,7 +75,7 @@ services:
       dockerfile: Dockerfile
     container_name: gdpr-api
     restart: unless-stopped
-    profiles: ["default", "postgres"]
+    profiles: ['default', 'postgres']
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
@@ -76,17 +84,25 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # Queue configuration
-      QUEUE_TYPE: ${QUEUE_TYPE:-postgres}  # postgres | redis
+      QUEUE_TYPE: ${QUEUE_TYPE:-postgres} # postgres | redis
       REDIS_URL: redis://redis:6379
       # Worker mode: api runs scanner inline when QUEUE_TYPE=postgres
-      WORKER_ENABLED: "${WORKER_ENABLED:-true}"
+      WORKER_ENABLED: '${WORKER_ENABLED:-true}'
     ports:
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/api/health',
+        ]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -103,7 +119,7 @@ services:
       dockerfile: Dockerfile
     container_name: gdpr-api-redis
     restart: unless-stopped
-    profiles: ["redis"]
+    profiles: ['redis']
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
@@ -113,16 +129,24 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
-      WORKER_ENABLED: "true"
+      WORKER_ENABLED: 'true'
     ports:
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/api/health',
+        ]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -139,13 +163,13 @@ services:
       dockerfile: Dockerfile
     container_name: gdpr-worker
     restart: unless-stopped
-    profiles: ["scaled"]
+    profiles: ['scaled']
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-gdpr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gdpr_audit}?schema=public
       QUEUE_TYPE: redis
       REDIS_URL: redis://redis:6379
-      WORKER_MODE: "true"  # Only process jobs, no HTTP server
+      WORKER_MODE: 'true' # Only process jobs, no HTTP server
       WORKER_CONCURRENCY: 1
     depends_on:
       postgres:
@@ -156,7 +180,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M  # Limit memory per worker
+          memory: 512M # Limit memory per worker
 
 volumes:
   postgres_data:
