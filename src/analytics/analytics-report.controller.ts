@@ -1,6 +1,16 @@
-import { Controller, Get, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
+import { AdminGuard } from '../common/admin/admin.guard';
 import { AnalyticsReportService } from './analytics-report.service';
 
+// Internal dashboard data — operators only.
+@UseGuards(AdminGuard)
 @Controller('analytics/reports')
 export class AnalyticsReportController {
   constructor(private readonly reportService: AnalyticsReportService) {}
@@ -11,10 +21,7 @@ export class AnalyticsReportController {
    */
   @Get('overview')
   @HttpCode(HttpStatus.OK)
-  async getOverview(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  async getOverview(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reportService.getOverview(
       from ? new Date(from) : undefined,
       to ? new Date(to) : undefined,
@@ -27,10 +34,7 @@ export class AnalyticsReportController {
    */
   @Get('geo')
   @HttpCode(HttpStatus.OK)
-  async getGeoReport(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  async getGeoReport(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reportService.getGeoReport(
       from ? new Date(from) : undefined,
       to ? new Date(to) : undefined,
@@ -75,10 +79,7 @@ export class AnalyticsReportController {
    */
   @Get('pages')
   @HttpCode(HttpStatus.OK)
-  async getPagesReport(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  async getPagesReport(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reportService.getPagesReport(
       from ? new Date(from) : undefined,
       to ? new Date(to) : undefined,

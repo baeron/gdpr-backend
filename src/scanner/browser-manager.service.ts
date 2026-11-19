@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium, Browser, BrowserContext } from 'playwright';
+import { EgressProxy } from './egress-proxy';
 
 /**
  * Manages the Playwright browser lifecycle.
@@ -10,6 +11,8 @@ export class BrowserManagerService implements OnModuleDestroy {
   private readonly logger = new Logger(BrowserManagerService.name);
   private browser: Browser | null = null;
   private browserLock = false;
+  /** All browser traffic is forced through this SSRF-filtering proxy. */
+  private readonly egressProxy = new EgressProxy();
 
   /**
    * Initialize or reinitialize the browser instance.
@@ -38,8 +41,12 @@ export class BrowserManagerService implements OnModuleDestroy {
     this.browserLock = true;
     try {
       this.logger.log('Initializing new browser instance...');
+      const proxyServer = await this.egressProxy.start();
       this.browser = await chromium.launch({
         headless: true,
+        // `<-loopback>` removes Chromium's implicit proxy bypass for
+        // localhost/127.0.0.1/[::1] so those requests are vetted too.
+        proxy: { server: proxyServer, bypass: '<-loopback>' },
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -62,6 +69,9 @@ export class BrowserManagerService implements OnModuleDestroy {
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
+      // Service workers can issue requests outside the page lifecycle;
+      // a scan never needs them.
+      serviceWorkers: 'block',
     });
   }
 
@@ -72,8 +82,7 @@ export class BrowserManagerService implements OnModuleDestroy {
     try {
       await context.close();
     } catch (error: unknown) {
-      const msg =
-        error instanceof Error ? error.message : 'Unknown error';
+      const msg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.warn(`Error closing context: ${msg}`);
     }
   }
@@ -110,5 +119,6 @@ export class BrowserManagerService implements OnModuleDestroy {
 
   async onModuleDestroy() {
     await this.closeBrowser();
+    await this.egressProxy.stop();
   }
 }

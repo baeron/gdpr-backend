@@ -10,10 +10,12 @@ import {
   Delete,
   Inject,
   BadRequestException,
+  NotFoundException,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
+import { AdminGuard } from '../common/admin/admin.guard';
 import { Idempotent } from '../common/idempotency/idempotency.interceptor';
 import type { Request } from 'express';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
@@ -198,7 +200,9 @@ export class ScannerController {
       limit: SCAN_RATE_LIMITS.scan.mediumLimit,
     },
   })
-  @UseGuards(TurnstileGuard)
+  // Returns the complete (paid) result synchronously and ties up a browser
+  // for up to SCAN_TIMEOUT_MS — operators only. Public clients use /queue.
+  @UseGuards(AdminGuard, TurnstileGuard)
   @Post('scan')
   @ApiOperation({
     summary: 'Scan website for GDPR compliance',
@@ -270,7 +274,9 @@ Performs a comprehensive GDPR compliance scan on the specified website.
   @ApiOperation({
     summary: 'Get scan report by ID',
     description:
-      'Retrieves a previously saved scan report with all issues and details.',
+      'Returns the report for the given id. Until the report is unlocked by a\n' +
+      'payment, only a preview is returned (`locked: true`: score, risk level,\n' +
+      'issue headlines). Personal data of the requester is never included.',
   })
   @ApiResponse({
     status: 200,
@@ -299,9 +305,15 @@ Performs a comprehensive GDPR compliance scan on the specified website.
   @ApiResponse({ status: 404, description: 'Report not found' })
   async getReport(@Param('id') id: string) {
     this.logger.log(`Fetching report: ${id}`);
-    return this.reportService.getReport(id);
+    const report = await this.reportService.getClientReport(id);
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+    return report;
   }
 
+  // Searches ALL reports by URL substring — operators only.
+  @UseGuards(AdminGuard)
   @Get('reports')
   @ApiOperation({
     summary: 'Get scan history for a website',
@@ -343,6 +355,7 @@ Performs a comprehensive GDPR compliance scan on the specified website.
     );
   }
 
+  @UseGuards(AdminGuard)
   @Patch('issue/:id/status')
   @ApiOperation({
     summary: 'Update issue status',
@@ -511,6 +524,7 @@ Use \`GET /scanner/job/:id\` to poll for status and results.
     return status;
   }
 
+  @UseGuards(AdminGuard)
   @Delete('job/:id')
   @ApiOperation({
     summary: 'Cancel a queued scan',
@@ -552,6 +566,7 @@ state (idempotent — safe to call repeatedly).
     return { retried };
   }
 
+  @UseGuards(AdminGuard)
   @SkipThrottle()
   @Get('queue/stats')
   @ApiOperation({

@@ -16,6 +16,10 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+// queue/stats is an admin endpoint; pass ADMIN_API_TOKEN when the target enforces it.
+const ADMIN_HEADERS = __ENV.ADMIN_API_TOKEN
+  ? { Authorization: `Bearer ${__ENV.ADMIN_API_TOKEN}` }
+  : {};
 
 export default function () {
   // 1. Health check
@@ -28,6 +32,7 @@ export default function () {
 
   // 2. Queue stats
   const statsRes = http.get(`${BASE_URL}/api/health/queue/stats`, {
+    headers: ADMIN_HEADERS,
     tags: { name: 'queue_stats' },
   });
   check(statsRes, {
