@@ -109,6 +109,10 @@ STRIPE_SECRET_KEY=<sk_live_... или sk_test_...>
 #            checkout.session.async_payment_failed
 # Без секрета webhook отвечает 500, и Stripe повторяет доставку.
 STRIPE_WEBHOOK_SECRET=<whsec_...>
+# Цена отчёта (опционально, по умолчанию €9.99 / €14.99 A/B, UK £8.99 / £12.99).
+# PRICE_A_CENTS=999
+# PRICE_B_CENTS=1499
+# PRICE_AB_TEST_ENABLED=true
 
 # --- Admin API (operator-only endpoints) ---
 # Пустое значение в production = админские эндпоинты отдают 403.

@@ -101,6 +101,76 @@ describe('PaymentService', () => {
     });
   });
 
+  describe('launch price points', () => {
+    const withEnv = (env: Record<string, string>) =>
+      new PaymentService(
+        { get: jest.fn((k: string) => env[k]) } as any,
+        mockPrisma,
+      );
+
+    it('defaults to €9.99 (A) vs €14.99 (B) in the EU and US', () => {
+      expect(service.getPricing('de', 'A')).toEqual({
+        amount: 999,
+        currency: 'eur',
+        variant: 'A',
+      });
+      expect(service.getPricing('de', 'B').amount).toBe(1499);
+      expect(service.getPricing('en-US', 'A')).toEqual({
+        amount: 999,
+        currency: 'usd',
+        variant: 'A',
+      });
+    });
+
+    it('uses its own pound price points in the UK', () => {
+      expect(service.getPricing('en-GB', 'A')).toEqual({
+        amount: 899,
+        currency: 'gbp',
+        variant: 'A',
+      });
+      expect(service.getPricing('gb', 'B').amount).toBe(1299);
+    });
+
+    it('maps browser locales by their region part', () => {
+      expect(service.getPricing('de-AT', 'A').currency).toBe('eur');
+      expect(service.getPricing('fr-FR', 'A').currency).toBe('eur');
+      expect(service.getPricing('es_US', 'A').currency).toBe('usd');
+      expect(service.getPricing('ja-JP', 'A')).toMatchObject({
+        amount: 999,
+        currency: 'eur',
+      });
+    });
+
+    it('reads price overrides from env', () => {
+      const svc = withEnv({ PRICE_A_CENTS: '1200', PRICE_UK_B_CENTS: '1100' });
+      expect(svc.getPricing('de', 'A').amount).toBe(1200);
+      expect(svc.getPricing('de', 'B').amount).toBe(1499);
+      expect(svc.getPricing('gb', 'B').amount).toBe(1100);
+    });
+
+    it('falls back to the default on a malformed or sub-minimum price', () => {
+      const svc = withEnv({ PRICE_A_CENTS: '9.99', PRICE_B_CENTS: '10' });
+      expect(svc.getPricing('de', 'A').amount).toBe(999);
+      expect(svc.getPricing('de', 'B').amount).toBe(1499);
+    });
+
+    it('serves only variant A when the A/B test is switched off', () => {
+      const svc = withEnv({ PRICE_AB_TEST_ENABLED: 'false' });
+      expect(svc.getPricing('de', 'B')).toMatchObject({
+        amount: 999,
+        variant: 'A',
+      });
+      expect(svc.getPricing('de').variant).toBe('A');
+    });
+
+    it('splits traffic between both arms when no variant is given', () => {
+      const seen = new Set(
+        Array.from({ length: 200 }, () => service.getPricing('de').variant),
+      );
+      expect(seen).toEqual(new Set(['A', 'B']));
+    });
+  });
+
   describe('createCheckoutSession', () => {
     it('should throw when Stripe is not configured', async () => {
       await expect(
@@ -127,115 +197,6 @@ describe('PaymentService', () => {
       const result = await service.verifyPayment('session-1');
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
-    });
-  });
-
-  describe('createLaunchCheckoutSession (slot retry)', () => {
-    /**
-     * The DB has UNIQUE(region, campaignId, slotNumber). When two requests
-     * race past the Redis fallback path and try to claim the same slot,
-     * the loser must transparently re-reserve a fresh slot rather than
-     * 500 to the user.
-     */
-    it('retries on P2002 with a fresh slot and a fresh Stripe session', async () => {
-      let recordCalls = 0;
-      const stripeCreate = jest.fn().mockImplementation(async () => ({
-        id: `cs_${recordCalls + 1}`,
-        url: 'https://stripe.test',
-      }));
-      const reserveSlot = jest
-        .fn()
-        .mockResolvedValueOnce({ slotNumber: 7, price: 7 })
-        .mockResolvedValueOnce({ slotNumber: 8, price: 8 });
-      const recordPurchase = jest.fn().mockImplementation(async () => {
-        recordCalls++;
-        if (recordCalls === 1) {
-          const e: any = new Error('Unique constraint failed');
-          e.code = 'P2002';
-          throw e;
-        }
-        return { id: 'lp-2' };
-      });
-
-      const prisma: any = {
-        launchPurchase: { update: jest.fn() },
-        payment: { create: jest.fn(), update: jest.fn() },
-        $transaction: jest.fn(),
-      };
-      const pricingService: any = {
-        getRegionFromCountry: () => 'EU',
-        reserveSlot,
-        recordPurchase,
-        updatePurchaseStatus: jest.fn(),
-      };
-      const geoService: any = {
-        getGeoFromIP: jest.fn(),
-        hashIP: () => 'hash',
-      };
-
-      const svc = new PaymentService(
-        { get: jest.fn().mockReturnValue('sk_test') } as any,
-        prisma,
-        pricingService,
-        geoService,
-      );
-      // Inject a fake Stripe client
-      (svc as any).stripe = {
-        checkout: { sessions: { create: stripeCreate } },
-      };
-
-      const result = await svc.createLaunchCheckoutSession({
-        reportId: 'r-1',
-        clientIp: '1.2.3.4',
-        country: 'DE',
-        successUrl: 'https://x/s',
-        cancelUrl: 'https://x/c',
-      });
-
-      expect(reserveSlot).toHaveBeenCalledTimes(2);
-      expect(stripeCreate).toHaveBeenCalledTimes(2);
-      expect(recordPurchase).toHaveBeenCalledTimes(2);
-      expect(result.slotNumber).toBe(8);
-      // Each retry must use a *new* idempotencyKey
-      const keys = stripeCreate.mock.calls.map((c) => c[1].idempotencyKey);
-      expect(new Set(keys).size).toBe(2);
-    });
-
-    it('rethrows non-P2002 errors without retrying', async () => {
-      const stripeCreate = jest
-        .fn()
-        .mockResolvedValue({ id: 'cs_1', url: 'https://stripe.test' });
-      const reserveSlot = jest
-        .fn()
-        .mockResolvedValue({ slotNumber: 1, price: 1 });
-      const recordPurchase = jest.fn().mockRejectedValue(new Error('boom'));
-
-      const svc = new PaymentService(
-        { get: jest.fn().mockReturnValue('sk_test') } as any,
-        { launchPurchase: { update: jest.fn() } } as any,
-        {
-          getRegionFromCountry: () => 'EU',
-          reserveSlot,
-          recordPurchase,
-        } as any,
-        { hashIP: () => 'h', getGeoFromIP: jest.fn() } as any,
-      );
-      (svc as any).stripe = {
-        checkout: { sessions: { create: stripeCreate } },
-      };
-
-      await expect(
-        svc.createLaunchCheckoutSession({
-          reportId: 'r-1',
-          clientIp: '1.2.3.4',
-          country: 'DE',
-          successUrl: 'https://x/s',
-          cancelUrl: 'https://x/c',
-        }),
-      ).rejects.toThrow('boom');
-
-      expect(reserveSlot).toHaveBeenCalledTimes(1);
-      expect(recordPurchase).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -406,13 +367,7 @@ describe('PaymentService', () => {
             : 'sk_test',
         ),
       };
-      const svc = new PaymentService(
-        config,
-        prisma,
-        undefined,
-        undefined,
-        email,
-      );
+      const svc = new PaymentService(config, prisma, undefined, email);
       const event = opts.event ?? {
         id: 'evt_1',
         type: 'checkout.session.completed',
