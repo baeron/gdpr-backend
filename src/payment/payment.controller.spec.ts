@@ -1,6 +1,11 @@
-import { BadRequestException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment --
+ * Stripe/Prisma are hand-rolled jest mocks; private handlers are reached via `any`. */
+import {
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { PaymentController } from './payment.controller';
-import { PaymentService } from './payment.service';
+import { PaymentService, WebhookSignatureError } from './payment.service';
 
 describe('PaymentController', () => {
   let controller: PaymentController;
@@ -8,13 +13,19 @@ describe('PaymentController', () => {
 
   beforeEach(() => {
     mockPaymentService = {
-      getPricing: jest.fn().mockReturnValue({ amount: 2900, currency: 'eur', variant: 'A' as const }),
+      getPricing: jest.fn().mockReturnValue({
+        amount: 2900,
+        currency: 'eur',
+        variant: 'A' as const,
+      }),
       createCheckoutSession: jest.fn().mockResolvedValue({
         sessionId: 'cs_123',
         url: 'https://checkout.stripe.com/cs_123',
         pricing: { amount: 2900, currency: 'eur', variant: 'A' as const },
       }),
-      verifyPayment: jest.fn().mockResolvedValue({ success: true, reportId: 'report-1' }),
+      verifyPayment: jest
+        .fn()
+        .mockResolvedValue({ success: true, reportId: 'report-1' }),
       isReportUnlocked: jest.fn().mockResolvedValue(false),
       handleWebhook: jest.fn().mockResolvedValue(undefined),
     };
@@ -31,7 +42,10 @@ describe('PaymentController', () => {
 
     it('should use default region when not provided', () => {
       controller.getPricing();
-      expect(mockPaymentService.getPricing).toHaveBeenCalledWith('en', undefined);
+      expect(mockPaymentService.getPricing).toHaveBeenCalledWith(
+        'en',
+        undefined,
+      );
     });
   });
 
@@ -48,7 +62,10 @@ describe('PaymentController', () => {
 
     it('should throw BadRequestException when reportId is missing', async () => {
       await expect(
-        controller.createCheckout({ reportId: '' } as any, 'https://example.com'),
+        controller.createCheckout(
+          { reportId: '' } as any,
+          'https://example.com',
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -63,6 +80,19 @@ describe('PaymentController', () => {
         }),
       );
     });
+  });
+
+  it('ignores an unknown Origin when building Stripe redirect URLs', async () => {
+    await controller.createCheckout(
+      { reportId: 'report-1' },
+      'https://evil.example',
+    );
+    expect(mockPaymentService.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        successUrl: 'https://policytracker.eu/report/full/report-1',
+        cancelUrl: 'https://policytracker.eu/scan/report-1',
+      }),
+    );
   });
 
   describe('verifyPayment', () => {
@@ -80,7 +110,9 @@ describe('PaymentController', () => {
     });
 
     it('should return true when report is unlocked', async () => {
-      (mockPaymentService.isReportUnlocked as jest.Mock).mockResolvedValue(true);
+      (mockPaymentService.isReportUnlocked as jest.Mock).mockResolvedValue(
+        true,
+      );
       const result = await controller.checkAccess('report-1');
       expect(result.unlocked).toBe(true);
     });
@@ -94,9 +126,9 @@ describe('PaymentController', () => {
       expect(result).toEqual({ received: true });
     });
 
-    it('should throw BadRequestException on webhook error', async () => {
+    it('answers 400 on a bad signature', async () => {
       (mockPaymentService.handleWebhook as jest.Mock).mockRejectedValue(
-        new Error('Webhook signature verification failed'),
+        new WebhookSignatureError('Webhook signature verification failed'),
       );
       const mockReq = { rawBody: Buffer.from('{}'), body: {} } as any;
       await expect(
@@ -104,13 +136,29 @@ describe('PaymentController', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should use req.body when rawBody is not available', async () => {
-      const mockReq = { body: { type: 'test' } } as any;
-      await controller.handleWebhook(mockReq, 'sig_123');
-      expect(mockPaymentService.handleWebhook).toHaveBeenCalledWith(
-        expect.any(Buffer),
-        'sig_123',
+    it('answers 5xx on a processing failure so Stripe redelivers', async () => {
+      (mockPaymentService.handleWebhook as jest.Mock).mockRejectedValue(
+        new Error('DB down'),
       );
+      const mockReq = { rawBody: Buffer.from('{}'), body: {} } as any;
+      await expect(
+        controller.handleWebhook(mockReq, 'sig_123'),
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('rejects a request without the raw body instead of re-serialising', async () => {
+      const mockReq = { body: { type: 'test' } } as any;
+      await expect(
+        controller.handleWebhook(mockReq, 'sig_123'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPaymentService.handleWebhook).not.toHaveBeenCalled();
+    });
+
+    it('rejects a request without a Stripe signature', async () => {
+      const mockReq = { rawBody: Buffer.from('{}') } as any;
+      await expect(
+        controller.handleWebhook(mockReq, undefined as unknown as string),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

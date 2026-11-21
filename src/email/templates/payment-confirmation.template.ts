@@ -27,6 +27,8 @@ export interface PaymentConfirmationParams {
   currency: string;
   paymentDate: Date;
   locale: string;
+  /** Absolute link to the unlocked report. Defaults to the English page. */
+  reportUrl?: string;
 }
 
 function formatDate(date: Date, locale: string): string {
@@ -73,7 +75,8 @@ export function generatePaymentConfirmationEmail(
   const subject = t.paymentConfirmation.subject;
   const preheader = t.paymentConfirmation.preheader;
 
-  const reportUrl = `https://policytracker.eu/report/${reportId}`;
+  const reportUrl =
+    params.reportUrl ?? `https://policytracker.eu/en/report/full/${reportId}`;
   const formattedAmount = formatCurrency(amount, currency, locale);
   const formattedDate = formatDate(paymentDate, locale);
 

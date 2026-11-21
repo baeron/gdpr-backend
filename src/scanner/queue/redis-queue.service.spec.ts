@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unused-vars --
+ * Pre-existing: BullMQ and Prisma are hand-rolled jest mocks in this spec. */
 import { Test, TestingModule } from '@nestjs/testing';
 import { RedisQueueService } from './redis-queue.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -539,6 +541,9 @@ describe('RedisQueueService', () => {
       (prismaService as any).scanJob.update.mockResolvedValue(mockJob);
       (scannerService as any).scanWebsite.mockResolvedValue(mockScanResult);
       (reportService as any).saveScanResult.mockResolvedValue('report-123');
+      (prismaService as any).scanJob.findUnique.mockResolvedValue({
+        auditRequestId: 'audit-9',
+      });
 
       await (service as any).processJob(mockBullJob);
 
@@ -552,8 +557,10 @@ describe('RedisQueueService', () => {
       expect((scannerService as any).scanWebsite).toHaveBeenCalledWith(
         'https://example.com',
       );
+      // The report is linked to the consent record captured at enqueue.
       expect((reportService as any).saveScanResult).toHaveBeenCalledWith(
         mockScanResult,
+        'audit-9',
       );
     });
 

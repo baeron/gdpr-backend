@@ -35,6 +35,11 @@ export interface AuditResultsParams {
   }>;
   locale: string;
   isFullReport: boolean;
+  /**
+   * Absolute link back to the report. The free report lives on the scan
+   * page (/:locale/scan/:jobId); the paid one on /:locale/report/full/:id.
+   */
+  reportUrl?: string;
 }
 
 function getScoreLabel(
@@ -90,7 +95,8 @@ export function generateAuditResultsEmail(params: AuditResultsParams): {
   const subject = `${t.auditResults.subject} - ${scoreLabel}: ${score}/100`;
   const preheader = t.auditResults.preheader;
 
-  const reportUrl = `https://policytracker.eu/report/${reportId}`;
+  const reportUrl =
+    params.reportUrl ?? `https://policytracker.eu/en/report/full/${reportId}`;
 
   // Generate top issues list
   const issuesHtml =

@@ -1,10 +1,33 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
-import { GeoService } from '../pricing/geo.service';
+import { EmailService } from '../email/email.service';
+import { frontendUrl } from '../common/frontend-url';
+
+/** Raised when a webhook payload does not carry a valid Stripe signature. */
+export class WebhookSignatureError extends Error {}
+
+/** Checkout payment states that mean the money is in (or none was owed). */
+const SETTLED_PAYMENT_STATUSES = new Set(['paid', 'no_payment_required']);
+
+/**
+ * Launch price points, in minor units (cents/pence). Variant A is the
+ * baseline, B the higher test arm. UK is set separately because a
+ * same-number £ price would be ~17% dearer. All overridable via env so a
+ * price change does not need a release; see .env.example.
+ */
+const DEFAULT_PRICES = {
+  A: 999,
+  B: 1499,
+  UK_A: 899,
+  UK_B: 1299,
+} as const;
+
+/** Stripe's minimum charge for EUR/USD/GBP is 50 minor units. */
+const MIN_CHARGE = 50;
 
 export interface PricingConfig {
   amount: number; // in cents
@@ -17,13 +40,9 @@ export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
   private readonly stripe: Stripe | null = null;
 
-  // A/B test pricing variants by region
-  private readonly pricingByRegion: Record<string, { A: number; B: number }> = {
-    EU: { A: 100, B: 100 }, // €29 vs €49
-    US: { A: 100, B: 100 }, // $29 vs $49
-    UK: { A: 100, B: 100 }, // £24 vs £39
-    DEFAULT: { A: 100, B: 100 },
-  };
+  // A/B test pricing variants by region (minor units). Filled from env.
+  private readonly pricingByRegion: Record<string, { A: number; B: number }>;
+  private readonly abTestEnabled: boolean;
 
   private readonly currencyByRegion: Record<string, string> = {
     EU: 'eur',
@@ -35,8 +54,10 @@ export class PaymentService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
-    private readonly pricingService?: PricingService,
-    private readonly geoService?: GeoService,
+    // Only used to settle legacy launch-campaign sessions created before
+    // the fixed-price switch; new checkouts never carry launchPurchaseId.
+    @Optional() private readonly pricingService?: PricingService,
+    @Optional() private readonly emailService?: EmailService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -46,6 +67,33 @@ export class PaymentService {
     } else {
       this.stripe = new Stripe(secretKey);
     }
+
+    const a = this.priceFromEnv('PRICE_A_CENTS', DEFAULT_PRICES.A);
+    const b = this.priceFromEnv('PRICE_B_CENTS', DEFAULT_PRICES.B);
+    const ukA = this.priceFromEnv('PRICE_UK_A_CENTS', DEFAULT_PRICES.UK_A);
+    const ukB = this.priceFromEnv('PRICE_UK_B_CENTS', DEFAULT_PRICES.UK_B);
+    this.pricingByRegion = {
+      EU: { A: a, B: b },
+      US: { A: a, B: b },
+      UK: { A: ukA, B: ukB },
+      DEFAULT: { A: a, B: b },
+    };
+    this.abTestEnabled =
+      this.configService.get<string>('PRICE_AB_TEST_ENABLED') !== 'false';
+  }
+
+  /** Integer minor-unit price from env, or the default when unset/invalid. */
+  private priceFromEnv(key: string, fallback: number): number {
+    const raw = this.configService.get<string>(key);
+    if (raw === undefined || raw === '') return fallback;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < MIN_CHARGE) {
+      this.logger.error(
+        `${key}="${raw}" is not an integer amount in cents >= ${MIN_CHARGE}; using ${fallback}`,
+      );
+      return fallback;
+    }
+    return value;
   }
 
   /**
@@ -58,157 +106,17 @@ export class PaymentService {
     const currency =
       this.currencyByRegion[normalizedRegion] || this.currencyByRegion.DEFAULT;
 
-    // Random A/B assignment if not specified
-    const selectedVariant = variant || (Math.random() < 0.5 ? 'A' : 'B');
+    // Random A/B assignment if not specified. With the test switched off
+    // everyone gets A, whatever variant the client sends back.
+    const selectedVariant = !this.abTestEnabled
+      ? 'A'
+      : variant || (Math.random() < 0.5 ? 'A' : 'B');
 
     return {
       amount: pricing[selectedVariant],
       currency,
       variant: selectedVariant,
     };
-  }
-
-  /**
-   * Create Stripe Checkout Session for launch campaign with dynamic pricing
-   */
-  async createLaunchCheckoutSession(params: {
-    reportId: string;
-    userEmail?: string;
-    clientIp: string;
-    country?: string;
-    city?: string;
-    successUrl: string;
-    cancelUrl: string;
-  }): Promise<{ 
-    sessionId: string; 
-    url: string; 
-    priceEur: number;
-    region: string;
-    slotNumber: number;
-  }> {
-    if (!this.stripe) {
-      throw new Error('Payment service not configured - STRIPE_SECRET_KEY missing');
-    }
-
-    if (!this.pricingService || !this.geoService) {
-      throw new Error('Pricing service not available for launch campaign');
-    }
-
-    // Determine region from country or IP
-    let region: any;
-    if (params.country) {
-      region = this.pricingService.getRegionFromCountry(params.country);
-    } else {
-      const geoData = await this.geoService.getGeoFromIP(params.clientIp);
-      region = geoData 
-        ? this.pricingService.getRegionFromCountry(geoData.country)
-        : 'OTHER';
-    }
-
-    const ipHash = this.geoService.hashIP(params.clientIp);
-
-    // Slot allocation can race when the Redis counter is unavailable and
-    // the service falls back to the DB-based reserveSlot path. The DB has
-    // a UNIQUE(region, campaignId, slotNumber) constraint as a backstop,
-    // so a losing race surfaces as a Prisma P2002 error here. Retry up to
-    // a small bound by re-reserving a fresh slot and re-issuing Stripe
-    // with a fresh idempotency key.
-    const MAX_SLOT_RETRIES = 5;
-    let lastErr: unknown;
-
-    for (let attempt = 1; attempt <= MAX_SLOT_RETRIES; attempt++) {
-      const { slotNumber, price } =
-        await this.pricingService.reserveSlot(region);
-
-      this.logger.log(
-        `Creating launch checkout for report ${params.reportId}, ` +
-          `region: ${region}, slot: ${slotNumber}, price: €${price} ` +
-          `(attempt ${attempt}/${MAX_SLOT_RETRIES})`,
-      );
-
-      // Each attempt gets its own id so a retry produces a NEW Stripe
-      // session (we cannot reuse the previous idempotency key with
-      // different metadata).
-      const launchPurchaseId = randomUUID();
-
-      // 1. Create the Stripe session FIRST. No orphan DB row on failure.
-      const session = await this.stripe.checkout.sessions.create(
-        {
-          payment_method_types: ['card'],
-          line_items: [
-            {
-              price_data: {
-                currency: 'eur',
-                product_data: {
-                  name: 'GDPR Detailed Report - Launch Special',
-                  description: `Complete GDPR analysis with recommendations (Launch price: €${price})`,
-                },
-                unit_amount: price * 100, // Convert to cents
-              },
-              quantity: 1,
-            },
-          ],
-          mode: 'payment',
-          success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: params.cancelUrl,
-          customer_email: params.userEmail,
-          metadata: {
-            reportId: params.reportId,
-            launchPurchaseId,
-            region,
-            slotNumber: slotNumber.toString(),
-            priceEur: price.toString(),
-            campaignId: 'launch-2026',
-          },
-        },
-        { idempotencyKey: launchPurchaseId },
-      );
-
-      try {
-        // 2. Persist the LaunchPurchase with stripeSessionId already set.
-        await this.pricingService.recordPurchase({
-          id: launchPurchaseId,
-          reportId: params.reportId,
-          region,
-          slotNumber,
-          priceEur: price,
-          country: params.country,
-          city: params.city,
-          ipHash,
-          userEmail: params.userEmail,
-          stripeSessionId: session.id,
-        });
-
-        return {
-          sessionId: session.id,
-          url: session.url!,
-          priceEur: price,
-          region,
-          slotNumber,
-        };
-      } catch (err: unknown) {
-        // P2002 = unique-constraint violation; here it can only mean
-        // another concurrent reservation grabbed the same slot first.
-        // The orphan Stripe session expires automatically and was never
-        // charged (mode=payment, no payment_intent until checkout).
-        const code = (err as { code?: string })?.code;
-        if (code === 'P2002') {
-          this.logger.warn(
-            `Slot ${slotNumber} for region ${region} was taken by a concurrent ` +
-              `reservation; retrying with a fresh slot.`,
-          );
-          lastErr = err;
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    // Exhausted retries — surface the last race error so the caller can 5xx.
-    throw new Error(
-      `Failed to reserve a launch slot for region ${region} after ` +
-        `${MAX_SLOT_RETRIES} attempts: ${(lastErr as Error)?.message ?? 'unknown'}`,
-    );
   }
 
   /**
@@ -307,36 +215,62 @@ export class PaymentService {
     const webhookSecret = this.configService.get<string>(
       'STRIPE_WEBHOOK_SECRET',
     );
+    if (!webhookSecret) {
+      // Config error, not a bad request: 5xx makes Stripe keep retrying
+      // until the secret is deployed instead of dropping the event.
+      throw new Error('STRIPE_WEBHOOK_SECRET is not configured');
+    }
 
     let event: Stripe.Event;
     try {
       event = this.stripe.webhooks.constructEvent(
         payload,
         signature,
-        webhookSecret || '',
+        webhookSecret,
       );
     } catch (err) {
       this.logger.error(
-        `Webhook signature verification failed: ${err.message}`,
+        `Webhook signature verification failed: ${(err as Error).message}`,
       );
-      throw new Error('Webhook signature verification failed');
+      throw new WebhookSignatureError('Webhook signature verification failed');
     }
 
-    this.logger.log(`Processing webhook event: ${event.type}`);
+    // Stripe delivers at-least-once. Claim the event id first so a
+    // redelivery (or a concurrent duplicate) is acknowledged without
+    // unlocking twice or sending a second confirmation e-mail.
+    try {
+      await this.prisma.stripeWebhookEvent.create({
+        data: { id: event.id, type: event.type },
+      });
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2002') {
+        this.logger.log(`Duplicate webhook event ${event.id}, skipping`);
+        return;
+      }
+      throw err;
+    }
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await this.handleCheckoutCompleted(
-          event.data.object as Stripe.Checkout.Session,
-        );
-        break;
-      case 'checkout.session.expired':
-        await this.handleCheckoutExpired(
-          event.data.object as Stripe.Checkout.Session,
-        );
-        break;
-      default:
-        this.logger.log(`Unhandled event type: ${event.type}`);
+    this.logger.log(`Processing webhook event ${event.id}: ${event.type}`);
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded':
+          await this.handleCheckoutCompleted(event.data.object);
+          break;
+        case 'checkout.session.expired':
+        case 'checkout.session.async_payment_failed':
+          await this.handleCheckoutExpired(event.data.object);
+          break;
+        default:
+          this.logger.log(`Unhandled event type: ${event.type}`);
+      }
+    } catch (err) {
+      // Release the claim so Stripe's redelivery is processed again.
+      await this.prisma.stripeWebhookEvent
+        .delete({ where: { id: event.id } })
+        .catch(() => undefined);
+      throw err;
     }
   }
 
@@ -379,8 +313,9 @@ export class PaymentService {
 
       return { success: false, error: 'Payment not completed' };
     } catch (error) {
-      this.logger.error(`Error verifying payment: ${error.message}`);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error verifying payment: ${message}`);
+      return { success: false, error: message };
     }
   }
 
@@ -405,7 +340,17 @@ export class PaymentService {
   private async handleCheckoutCompleted(
     session: Stripe.Checkout.Session,
   ): Promise<void> {
-    this.logger.log(`Checkout completed: ${session.id}`);
+    this.logger.log(
+      `Checkout completed: ${session.id} (payment_status=${session.payment_status})`,
+    );
+
+    // `completed` also fires for delayed payment methods before the money
+    // arrives (payment_status=unpaid); those unlock on
+    // async_payment_succeeded instead.
+    if (!SETTLED_PAYMENT_STATUSES.has(session.payment_status)) {
+      this.logger.log(`Session ${session.id} not paid yet, not unlocking`);
+      return;
+    }
 
     const reportId = session.metadata?.reportId;
     const paymentId = session.metadata?.paymentId;
@@ -456,6 +401,57 @@ export class PaymentService {
     }
     if (reportId) {
       this.logger.log(`Full report unlocked for: ${reportId}`);
+      await this.sendPaymentConfirmation(session, reportId);
+    }
+  }
+
+  /**
+   * Payment receipt with the link to the unlocked report. The link is the
+   * buyer's only way back to the report if they closed the success page,
+   * so it is sent from the webhook rather than the redirect. A mail
+   * failure is logged and never fails the webhook: the unlock is already
+   * committed and a retry would not re-send (the event is claimed).
+   */
+  private async sendPaymentConfirmation(
+    session: Stripe.Checkout.Session,
+    reportId: string,
+  ): Promise<void> {
+    if (!this.emailService) return;
+
+    try {
+      const to = session.customer_details?.email ?? session.customer_email;
+      if (!to) {
+        this.logger.warn(
+          `No buyer e-mail on session ${session.id}; confirmation not sent`,
+        );
+        return;
+      }
+
+      const [report, job] = await Promise.all([
+        this.prisma.auditReport.findUnique({
+          where: { id: reportId },
+          select: { websiteUrl: true },
+        }),
+        this.prisma.scanJob.findFirst({
+          where: { reportId },
+          select: { locale: true },
+        }),
+      ]);
+      const locale = job?.locale ?? 'en';
+
+      await this.emailService.sendPaymentConfirmation(to, {
+        reportId,
+        websiteUrl: report?.websiteUrl ?? '',
+        amount: ((session.amount_total ?? 0) / 100).toFixed(2),
+        currency: session.currency ?? 'eur',
+        paymentDate: new Date(),
+        locale,
+        reportUrl: frontendUrl(locale, `report/full/${reportId}`),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Payment confirmation e-mail for report ${reportId} failed: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -466,8 +462,11 @@ export class PaymentService {
 
     const paymentId = session.metadata?.paymentId;
     if (paymentId) {
-      await this.prisma.payment.update({
-        where: { id: paymentId },
+      // updateMany: a missing or already-completed row is not an error
+      // worth a Stripe retry loop, and a late `expired` must never
+      // downgrade a payment that already completed.
+      await this.prisma.payment.updateMany({
+        where: { id: paymentId, status: 'PENDING' },
         data: { status: 'EXPIRED' },
       });
     }
@@ -514,6 +513,15 @@ export class PaymentService {
       'en-gb': 'UK',
     };
 
-    return regionMap[region.toLowerCase()] || 'DEFAULT';
+    // Accept full locales (en-us), bare countries (de) and language-region
+    // tags whose region part decides (de-at -> at -> EU).
+    const tag = (region || '').toLowerCase().replace('_', '-');
+    const [lang, country] = tag.split('-');
+    return (
+      regionMap[tag] ||
+      (country && regionMap[country]) ||
+      regionMap[lang] ||
+      'DEFAULT'
+    );
   }
 }

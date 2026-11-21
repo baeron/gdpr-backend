@@ -10,8 +10,10 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -21,7 +23,19 @@ import {
 } from '@nestjs/swagger';
 import { IsString, IsOptional, IsIn } from 'class-validator';
 import type { Request } from 'express';
-import { PaymentService } from './payment.service';
+import { PaymentService, WebhookSignatureError } from './payment.service';
+
+// Stripe redirects back to the origin that started checkout. Only our own
+// frontends qualify, otherwise any caller could point the success/cancel
+// URLs at an arbitrary site.
+const CHECKOUT_ORIGINS = new Set([
+  'https://policytracker.eu',
+  'https://www.policytracker.eu',
+  'https://dev.policytracker.eu',
+  'https://www.dev.policytracker.eu',
+  'http://localhost:4200',
+]);
+const DEFAULT_CHECKOUT_ORIGIN = 'https://policytracker.eu';
 
 class CreateCheckoutDto {
   @ApiProperty({ description: 'Report ID to purchase' })
@@ -68,7 +82,8 @@ export class PaymentController {
       throw new BadRequestException('reportId is required');
     }
 
-    const baseUrl = origin || 'https://policytracker.eu';
+    const baseUrl =
+      origin && CHECKOUT_ORIGINS.has(origin) ? origin : DEFAULT_CHECKOUT_ORIGIN;
 
     const result = await this.paymentService.createCheckoutSession({
       reportId: body.reportId,
@@ -122,19 +137,29 @@ export class PaymentController {
 
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
+  // Stripe retries bursts from a small set of IPs; rate limiting them
+  // would drop paid-order events. The signature check is the gate here.
+  @SkipThrottle({ short: true, medium: true, long: true })
   @ApiOperation({ summary: 'Stripe webhook endpoint' })
   async handleWebhook(
     @Req() req: Request & { rawBody?: Buffer },
     @Headers('stripe-signature') signature: string,
   ) {
-    const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
+    if (!req.rawBody || !signature) {
+      throw new BadRequestException('Missing raw body or Stripe signature');
+    }
 
     try {
-      await this.paymentService.handleWebhook(rawBody, signature);
+      await this.paymentService.handleWebhook(req.rawBody, signature);
       return { received: true };
     } catch (error) {
-      this.logger.error(`Webhook error: ${error.message}`);
-      throw new BadRequestException(error.message);
+      if (error instanceof WebhookSignatureError) {
+        throw new BadRequestException(error.message);
+      }
+      // Processing failure: answer 5xx so Stripe redelivers the event.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Webhook processing failed: ${message}`);
+      throw new InternalServerErrorException('Webhook processing failed');
     }
   }
 }

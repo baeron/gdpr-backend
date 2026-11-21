@@ -2,10 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from './email.service';
 import { PdfReportService } from './pdf-report.service';
-import {
-  ScanResultDto,
-  RiskLevel,
-} from '../scanner/dto/scan-result.dto';
+import { ScanResultDto, RiskLevel } from '../scanner/dto/scan-result.dto';
 
 describe('EmailService', () => {
   let service: EmailService;
@@ -89,20 +86,43 @@ describe('EmailService', () => {
     },
     securityHeaders: {
       headers: {},
-      csp: { present: true, value: "default-src 'self'", hasDefaultSrc: true, hasScriptSrc: false, hasUnsafeInline: false, hasUnsafeEval: false },
-      hsts: { present: true, value: 'max-age=31536000', maxAge: 31536000, includesSubDomains: false, preload: false },
+      csp: {
+        present: true,
+        value: "default-src 'self'",
+        hasDefaultSrc: true,
+        hasScriptSrc: false,
+        hasUnsafeInline: false,
+        hasUnsafeEval: false,
+      },
+      hsts: {
+        present: true,
+        value: 'max-age=31536000',
+        maxAge: 31536000,
+        includesSubDomains: false,
+        preload: false,
+      },
       xFrameOptions: { present: true, value: 'DENY' },
       xContentTypeOptions: { present: true, value: 'nosniff' },
-      referrerPolicy: { present: true, value: 'strict-origin-when-cross-origin' },
+      referrerPolicy: {
+        present: true,
+        value: 'strict-origin-when-cross-origin',
+      },
       permissionsPolicy: { present: true, value: 'camera=(), microphone=()' },
       missingHeaders: [],
       score: 85,
     },
     sslCertificate: {
-      valid: true, issuer: "Let's Encrypt", subject: 'example.com',
-      validFrom: '2025-01-01T00:00:00Z', validTo: '2026-06-01T00:00:00Z',
-      daysUntilExpiry: 104, protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384',
-      keyExchange: null, selfSigned: false, error: null,
+      valid: true,
+      issuer: "Let's Encrypt",
+      subject: 'example.com',
+      validFrom: '2025-01-01T00:00:00Z',
+      validTo: '2026-06-01T00:00:00Z',
+      daysUntilExpiry: 104,
+      protocol: 'TLSv1.3',
+      cipher: 'TLS_AES_256_GCM_SHA384',
+      keyExchange: null,
+      selfSigned: false,
+      error: null,
     },
     forms: {
       totalForms: 1,
@@ -189,9 +209,7 @@ describe('EmailService', () => {
         score: 85,
         issuesCount: 3,
         passedCount: 4,
-        topIssues: [
-          { title: 'Issue 1', severity: 'critical' },
-        ],
+        topIssues: [{ title: 'Issue 1', severity: 'critical' }],
         isFullReport: false,
         scanResult: makeScanResult(),
       });
@@ -201,7 +219,7 @@ describe('EmailService', () => {
         expect.objectContaining({ websiteUrl: 'https://example.com' }),
         expect.objectContaining({
           mode: 'free',
-          upgradeUrl: 'https://policytracker.eu/report/report-456?upgrade=true',
+          upgradeUrl: 'https://policytracker.eu/en/report/full/report-456',
           reportId: 'report-456',
         }),
       );
