@@ -138,11 +138,13 @@ SENTRY_PROFILES_SAMPLE_RATE=0.1
 
 ```bash
 cd /opt/gdpr-backend
-docker compose --env-file .env.production --profile redis up -d --build
+bash scripts/deploy-prod.sh initial
 ```
 
-На первом запуске Prisma применит миграции автоматически
-(`npx prisma migrate deploy` в `command:` сервиса `api-redis`).
+Скрипт проверяет `.env.production`, делает дамп БД, собирает образ
+`gdpr-backend-api:<tag>`, отдельным шагом применяет миграции
+(`prisma migrate deploy`), запускает API и ждёт `/api/health`.
+Сервис (`api` или `api-redis`) выбирается по `QUEUE_TYPE` из `.env.production`.
 
 Проверка:
 
@@ -206,20 +208,63 @@ curl -sI https://api.policytracker.eu/api/v1/health
 
 ---
 
-## 6. Обновление deploy (пересборка образа)
+## 6. Обновление deploy
+
+Штатный путь — Azure Pipelines: push в `main` → стадия **Build & Test** →
+стадия **Deploy to PROD (Contabo)** ждёт approval в environment
+`production` → rsync кода → `scripts/deploy-prod.sh <buildId>-<sha>`.
+
+Скрипт по шагам:
+
+1. проверяет, что `.env.production` есть и содержит обязательные ключи
+   (`ADMIN_API_TOKEN`, `STRIPE_WEBHOOK_SECRET`, `TURNSTILE_SECRET_KEY`,
+   `FRONTEND_URL`, ...). **CI этот файл никогда не пишет** — он ведётся
+   только на сервере;
+2. делает `pg_dump` в `backups/predeploy-*.sql.gz` (хранит 5 последних);
+3. собирает образ `gdpr-backend-api:<tag>`;
+4. применяет миграции отдельным шагом;
+5. переключает контейнер API и ждёт health; если health не прошёл —
+   возвращает предыдущий образ и падает.
+
+Postgres/Redis и их тома скрипт не пересоздаёт и не чистит.
+
+Ручной деплой (если pipeline недоступен):
 
 ```bash
 # Локально
-rsync -az --delete [...] ./ root@<VPS>:/opt/gdpr-backend/
+rsync -az --delete [...] \
+  --exclude 'backups/' --exclude '.deployed-release*' \
+  ./ root@<VPS>:/opt/gdpr-backend/
 
 # На сервере
 cd /opt/gdpr-backend
-docker compose --env-file .env.production --profile redis up -d --build
-docker image prune -f   # чистим старый образ
+bash scripts/deploy-prod.sh manual-$(date -u +%Y%m%d%H%M)
 ```
 
-Миграции БД применяются автоматически при старте контейнера через
-`npx prisma migrate deploy`.
+Откат на предыдущий релиз (образ остаётся на сервере):
+
+```bash
+bash scripts/deploy-prod.sh --rollback
+```
+
+Миграции при откате не откатываются: они должны быть обратно
+совместимы, а на крайний случай есть дамп из `backups/`.
+
+### Настройка pipeline (один раз)
+
+В Pipelines → Library создать variable group **`contabo-deployment`**:
+
+| Переменная            | Значение                                             |
+| --------------------- | ---------------------------------------------------- |
+| `CONTABO_HOST`        | `167.86.116.58`                                      |
+| `CONTABO_SSH_USER`    | пользователь с правами на docker (сейчас `root`)     |
+| `CONTABO_SSH_KEY`     | **secret**: приватный deploy-ключ, `base64 -w0`      |
+| `CONTABO_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 167.86.116.58 \| base64 -w0` |
+
+Перед сохранением `CONTABO_KNOWN_HOSTS` сверьте отпечаток с ключом самого
+сервера (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` на хосте):
+`SHA256:qEiVrWq4fbZJzUSHMyJ3OOyODqPDByBm4ojXO9xdMq8`.
+Публичная часть deploy-ключа — в `~/.ssh/authorized_keys` пользователя.
 
 ---
 

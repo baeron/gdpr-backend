@@ -73,6 +73,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Tagged per release so the previous image stays around for rollback.
+    image: gdpr-backend-api:${IMAGE_TAG:-local}
     container_name: gdpr-api
     restart: unless-stopped
     profiles: ['default', 'postgres']
@@ -107,17 +109,17 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
-    command: >
-      sh -c "
-        npx prisma migrate deploy &&
-        npm run start:prod
-      "
+    # Migrations run as a separate step before the swap
+    # (scripts/deploy-prod.sh), not on every container start.
+    command: npm run start:prod
 
   # ==================== API with Redis ====================
   api-redis:
     build:
       context: .
       dockerfile: Dockerfile
+    # Tagged per release so the previous image stays around for rollback.
+    image: gdpr-backend-api:${IMAGE_TAG:-local}
     container_name: gdpr-api-redis
     restart: unless-stopped
     profiles: ['redis']
@@ -148,11 +150,9 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
-    command: >
-      sh -c "
-        npx prisma migrate deploy &&
-        npm run start:prod
-      "
+    # Migrations run as a separate step before the swap
+    # (scripts/deploy-prod.sh), not on every container start.
+    command: npm run start:prod
 
   # ==================== SEPARATE WORKER (scaled) ====================
   worker:

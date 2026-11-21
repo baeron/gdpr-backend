@@ -225,170 +225,41 @@ stages:
             displayName: 'Run E2E tests'
 
   # ============================================
-  # Stage 2: Deploy to DEV (automatic after Build)
+  # Stage 2: Deploy to PROD (Contabo, manual approval required)
   # ============================================
-  - stage: DeployDev
-    displayName: 'Deploy to DEV'
-    dependsOn: Build
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-    variables:
-      - group: vultr-deployment
-      - group: gdpr-secrets-dev
-    jobs:
-      - deployment: DeployDev
-        displayName: 'Deploy to DEV Environment'
-        pool:
-          vmImage: 'ubuntu-latest'
-        environment: 'development'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-
-                - script: |
-                    mkdir -p ~/.ssh
-                    echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
-                    chmod 600 ~/.ssh/deploy_key
-                    ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
-                  displayName: 'Setup SSH Key'
-
-                - script: |
-                    rsync -avz --delete \
-                      --exclude 'node_modules' \
-                      --exclude '.git' \
-                      --exclude 'coverage' \
-                      --exclude '.env*' \
-                      -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-                      ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
-                  displayName: 'Copy files to server'
-
-                - script: |
-                    QUEUE_TYPE_VALUE="$(QUEUE_TYPE)"
-                    if [ -z "${QUEUE_TYPE_VALUE}" ] || [ "${QUEUE_TYPE_VALUE}" = '$(QUEUE_TYPE)' ]; then
-                      QUEUE_TYPE_VALUE="$(defaultQueueType)"
-                    fi
-
-                    case "${QUEUE_TYPE_VALUE}" in
-                      redis|hybrid)
-                        DOCKER_PROFILE_VALUE="redis"
-                        ;;
-                      *)
-                        DOCKER_PROFILE_VALUE="postgres"
-                        ;;
-                    esac
-                    
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
-                      set -e
-                      cd /opt/gdpr-backend
-                      
-                      echo "=== Starting DEV deployment ==="
-                      echo "Queue type: ${QUEUE_TYPE_VALUE}"
-                      echo "Docker profile: ${DOCKER_PROFILE_VALUE:-none}"
-                      
-                      printf '%s\n' \
-                        "POSTGRES_USER=$(POSTGRES_USER)" \
-                        "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
-                        "POSTGRES_DB=$(POSTGRES_DB)" \
-                        "RESEND_API_KEY=$(RESEND_API_KEY)" \
-                        "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
-                        "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
-                        "NODE_ENV=development" \
-                        "QUEUE_TYPE=${QUEUE_TYPE_VALUE}" \
-                        "REDIS_URL=$(REDIS_URL)" \
-                        "WORKER_URL=$(WORKER_URL)" \
-                        "WORKER_AUTH_TOKEN=$(WORKER_AUTH_TOKEN)" \
-                        "WORKER_ENABLED=$(WORKER_ENABLED)" \
-                        "WORKER_CONCURRENCY=$(WORKER_CONCURRENCY)" \
-                        "WORKER_FALLBACK_ENABLED=$(WORKER_FALLBACK_ENABLED)" \
-                        "OVERFLOW_ENABLED=$(OVERFLOW_ENABLED)" \
-                        "OVERFLOW_QUEUE_THRESHOLD=$(OVERFLOW_QUEUE_THRESHOLD)" \
-                        "OVERFLOW_WAIT_THRESHOLD_SEC=$(OVERFLOW_WAIT_THRESHOLD_SEC)" \
-                        "OVERFLOW_CHECK_INTERVAL_MS=$(OVERFLOW_CHECK_INTERVAL_MS)" \
-                        > .env.devprod
-
-                      # Clean up orphan containers and volumes
-                      docker system prune -f
-                      docker volume prune -f
-                      docker-compose --env-file .env.production down --remove-orphans || true
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml down --remove-orphans || true
-                      
-                      # Ensure postgres is running for dev API
-                      docker-compose --env-file .env.production up -d postgres
-                      docker network inspect gdpr-backend_default >/dev/null 2>&1 || docker network create gdpr-backend_default
-                      docker network connect gdpr-backend_default gdpr-postgres >/dev/null 2>&1 || true
-                      for i in {1..30}; do
-                        status=\$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)
-                        if [ "\$status" = "healthy" ]; then
-                          echo "Postgres is healthy."
-                          break
-                        fi
-                        echo "Waiting for postgres... (\$i/30)"
-                        sleep 2
-                      done
-                      if [ "\$(docker inspect -f '{{.State.Health.Status}}' gdpr-postgres 2>/dev/null || true)" != "healthy" ]; then
-                        echo "Postgres is not healthy."
-                        exit 1
-                      fi
-                      
-                      # Stop dev containers (api-dev doesn't have profiles, just stop it)
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml stop api-dev || true
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml rm -f api-dev || true
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis stop redis-dev || true
-                      docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis rm -f redis-dev || true
-                      
-                      # Build and start with selected profile (redis profile adds redis-dev container)
-                      echo "Starting DEV with profile: ${DOCKER_PROFILE_VALUE}"
-                      if [ "${DOCKER_PROFILE_VALUE}" = "redis" ]; then
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis build --no-cache --pull
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml --profile redis up -d
-                      else
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml build --no-cache --pull
-                        docker-compose --env-file .env.devprod -f docker-compose.devprod.yml up -d
-                      fi
-                      
-                      # Wait for container health
-                      for i in {1..60}; do
-                        status=\$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)
-                        if [ "\$status" = "healthy" ]; then
-                          echo "Dev API container is healthy."
-                          break
-                        fi
-                        echo "Waiting for dev API... (\$i/60)"
-                        sleep 2
-                      done
-
-                      if [ "\$(docker inspect -f '{{.State.Health.Status}}' gdpr-api-dev 2>/dev/null || true)" != "healthy" ]; then
-                        echo "Dev API did not become healthy."
-                        docker logs --tail=200 gdpr-api-dev || true
-                        exit 1
-                      fi
-
-                      curl -f http://localhost:3001/api/health
-                      echo "=== DEV Deployment successful! ==="
-                    DEPLOY_SCRIPT
-                  displayName: 'Deploy to DEV'
-
-  # ============================================
-  # Stage 3: Deploy to PROD (manual approval required)
-  # ============================================
+  # There is no separate DEV deploy: the old DeployDev stage targeted the
+  # retired Vultr host and, on a shared box, ran `docker volume prune` and
+  # `down` on the prod stack. PRs are validated by the Build stage only.
+  #
+  # Variable group `contabo-deployment` (set up once in Pipelines -> Library):
+  #   CONTABO_HOST         167.86.116.58
+  #   CONTABO_SSH_USER     user with docker rights on the host (e.g. root)
+  #   CONTABO_SSH_KEY      secret: private deploy key, base64-encoded
+  #   CONTABO_KNOWN_HOSTS  output of `ssh-keyscan -t ed25519 <host>`, base64-
+  #                        encoded, verified against the host's own key:
+  #                        SHA256:qEiVrWq4fbZJzUSHMyJ3OOyODqPDByBm4ojXO9xdMq8
+  #
+  # .env.production on the server is server-managed and never written here;
+  # scripts/deploy-prod.sh refuses to deploy when a required key is missing.
   - stage: DeployProd
-    displayName: 'Deploy to PROD'
-    dependsOn: DeployDev
+    displayName: 'Deploy to PROD (Contabo)'
+    dependsOn: Build
     condition: >
-      or(
-        eq(${{ parameters.runProdOnly }}, true),
-        and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+      and(
+        succeeded(),
+        or(
+          eq(${{ parameters.runProdOnly }}, true),
+          eq(variables['Build.SourceBranch'], 'refs/heads/main')
+        )
       )
     variables:
-      - group: vultr-deployment
-      - group: gdpr-secrets-prod
+      - group: contabo-deployment
     jobs:
       - deployment: DeployProduction
         displayName: 'Deploy to PROD Environment'
         pool:
           vmImage: 'ubuntu-latest'
-        environment: 'production'  # Requires manual approval in Azure DevOps
+        environment: 'production' # Approval check configured on the environment
         strategy:
           runOnce:
             deploy:
@@ -396,100 +267,52 @@ stages:
                 - checkout: self
 
                 - script: |
+                    set -euo pipefail
                     mkdir -p ~/.ssh
-                    echo "$(VULTR_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
+                    echo "$(CONTABO_SSH_KEY)" | base64 -d > ~/.ssh/deploy_key
                     chmod 600 ~/.ssh/deploy_key
-                    ssh-keyscan -H $(VULTR_HOST) >> ~/.ssh/known_hosts
-                  displayName: 'Setup SSH Key'
+                    # Pinned host key: no ssh-keyscan at deploy time, so a
+                    # spoofed host is rejected instead of trusted.
+                    echo "$(CONTABO_KNOWN_HOSTS)" | base64 -d > ~/.ssh/known_hosts
+                    chmod 644 ~/.ssh/known_hosts
+                  displayName: 'Setup SSH key and pinned host key'
 
                 - script: |
-                    rsync -avz --delete \
-                      --exclude 'node_modules' \
-                      --exclude '.git' \
-                      --exclude 'coverage' \
-                      --exclude '.env*' \
-                      -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-                      ./ deploy@$(VULTR_HOST):/opt/gdpr-backend/
-                  displayName: 'Copy files to server'
+                    set -euo pipefail
+                    SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+                    # Server-side state is excluded so --delete never removes it.
+                    rsync -az --delete \
+                      --exclude '.git/' --exclude 'node_modules/' --exclude 'dist/' \
+                      --exclude 'coverage/' --exclude 'tests/load/results/' \
+                      --exclude '.env' --exclude '.env.*' \
+                      --exclude 'backups/' --exclude '.deployed-release*' \
+                      --exclude '.claude/' --exclude 'gcp-service-account.json' \
+                      -e "$SSH" \
+                      ./ "$(CONTABO_SSH_USER)@$(CONTABO_HOST):/opt/gdpr-backend/"
+                  displayName: 'Copy release to server'
 
                 - script: |
-                    QUEUE_TYPE_VALUE="$(QUEUE_TYPE)"
-                    if [ -z "${QUEUE_TYPE_VALUE}" ] || [ "${QUEUE_TYPE_VALUE}" = '$(QUEUE_TYPE)' ]; then
-                      QUEUE_TYPE_VALUE="$(defaultQueueType)"
-                    fi
-
-                    case "${QUEUE_TYPE_VALUE}" in
-                      redis|hybrid)
-                        DOCKER_PROFILE_VALUE="redis"
-                        ;;
-                      *)
-                        DOCKER_PROFILE_VALUE="postgres"
-                        ;;
-                    esac
-                    
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << DEPLOY_SCRIPT
-                      set -e
-                      cd /opt/gdpr-backend
-                      
-                      echo "=== Starting PROD deployment ==="
-                      echo "Queue type: ${QUEUE_TYPE_VALUE}"
-                      echo "Docker profile: ${DOCKER_PROFILE_VALUE:-none}"
-                      
-                      printf '%s\n' \
-                        "POSTGRES_USER=$(POSTGRES_USER)" \
-                        "POSTGRES_PASSWORD=$(POSTGRES_PASSWORD)" \
-                        "POSTGRES_DB=$(POSTGRES_DB)" \
-                        "RESEND_API_KEY=$(RESEND_API_KEY)" \
-                        "STRIPE_SECRET_KEY=$(STRIPE_SECRET_KEY)" \
-                        "STRIPE_WEBHOOK_SECRET=$(STRIPE_WEBHOOK_SECRET)" \
-                        "NODE_ENV=production" \
-                        "QUEUE_TYPE=${QUEUE_TYPE_VALUE}" \
-                        "REDIS_URL=$(REDIS_URL)" \
-                        "WORKER_URL=$(WORKER_URL)" \
-                        "WORKER_AUTH_TOKEN=$(WORKER_AUTH_TOKEN)" \
-                        "WORKER_ENABLED=$(WORKER_ENABLED)" \
-                        "WORKER_CONCURRENCY=$(WORKER_CONCURRENCY)" \
-                        "WORKER_FALLBACK_ENABLED=$(WORKER_FALLBACK_ENABLED)" \
-                        "OVERFLOW_ENABLED=$(OVERFLOW_ENABLED)" \
-                        "OVERFLOW_QUEUE_THRESHOLD=$(OVERFLOW_QUEUE_THRESHOLD)" \
-                        "OVERFLOW_WAIT_THRESHOLD_SEC=$(OVERFLOW_WAIT_THRESHOLD_SEC)" \
-                        "OVERFLOW_CHECK_INTERVAL_MS=$(OVERFLOW_CHECK_INTERVAL_MS)" \
-                        > .env.production
-                      
-                      # Stop API containers (both postgres and redis variants)
-                      docker-compose --env-file .env.production --profile postgres stop api || true
-                      docker-compose --env-file .env.production --profile postgres rm -f api || true
-                      docker-compose --env-file .env.production --profile redis stop api-redis || true
-                      docker-compose --env-file .env.production --profile redis rm -f api-redis || true
-                      
-                      # Build and start with selected profile
-                      echo "Starting with profile: ${DOCKER_PROFILE_VALUE}"
-                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE_VALUE} build --no-cache --pull
-                      docker-compose --env-file .env.production --profile ${DOCKER_PROFILE_VALUE} up -d
-                      
-                      # Wait for health check
-                      for i in {1..30}; do
-                        if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
-                          echo "Health check passed!"
-                          break
-                        fi
-                        echo "Waiting for health check... (\$i/30)"
-                        sleep 2
-                      done
-                      
-                      curl -f http://localhost:3000/api/health || exit 1
-                      
-                      docker-compose ps
-                      echo "=== PROD Deployment successful! ==="
-                    DEPLOY_SCRIPT
-                  displayName: 'Deploy to PROD'
+                    set -euo pipefail
+                    # Release tag = build id + short commit: unique, traceable
+                    # to the commit, and a valid docker tag.
+                    RELEASE="$(Build.BuildId)-$(echo '$(Build.SourceVersion)' | cut -c1-8)"
+                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+                      -o UserKnownHostsFile=$HOME/.ssh/known_hosts \
+                      "$(CONTABO_SSH_USER)@$(CONTABO_HOST)" \
+                      "cd /opt/gdpr-backend && bash scripts/deploy-prod.sh '$RELEASE'"
+                  displayName: 'Deploy (backup, build, migrate, swap, health check)'
 
                 - script: |
-                    ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy@$(VULTR_HOST) << 'EOF'
-                      docker image prune -f
-                    EOF
-                  displayName: 'Cleanup old images'
-                  condition: succeeded()
+                    set -euo pipefail
+                    for i in $(seq 1 10); do
+                      if curl -sf https://api.policytracker.eu/api/health; then
+                        echo; echo "Public health check passed."; exit 0
+                      fi
+                      sleep 6
+                    done
+                    echo "Public endpoint https://api.policytracker.eu/api/health is not healthy" >&2
+                    exit 1
+                  displayName: 'Public health check'
 
   - stage: DeployCloudRunWorker
     displayName: 'Deploy Cloud Run Worker'
@@ -504,7 +327,6 @@ stages:
       )
     variables:
       - group: gdpr-secrets-prod
-      - group: vultr-deployment
       - name: GCP_PROJECT_ID
         value: 'gdpr-scanner-worker'
       - name: GCP_REGION
@@ -544,7 +366,7 @@ stages:
 
                 - script: |
                     DATABASE_URL="postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@45.63.119.28:5432/$(POSTGRES_DB)?schema=public"
-                    
+
                     gcloud run deploy $(CLOUD_RUN_SERVICE) \
                       --source . \
                       --region=$(GCP_REGION) \
@@ -563,7 +385,7 @@ stages:
                     SERVICE_URL=$(gcloud run services describe $(CLOUD_RUN_SERVICE) \
                       --region=$(GCP_REGION) \
                       --format='value(status.url)')
-                    
+
                     echo "Testing Cloud Run service at: ${SERVICE_URL}/health"
                     curl -f "${SERVICE_URL}/health" || exit 1
                     echo "Cloud Run Worker deployment successful!"
