@@ -24,9 +24,10 @@ describe('ScannerController', () => {
     };
     mockReportService = {
       saveScanResult: jest.fn().mockResolvedValue('report-123'),
-      getReport: jest.fn().mockResolvedValue({
+      getClientReport: jest.fn().mockResolvedValue({
         id: 'report-123',
         websiteUrl: 'https://example.com',
+        locked: true,
       }),
       getReportsByWebsite: jest.fn().mockResolvedValue([]),
       updateIssueStatus: jest
@@ -107,10 +108,21 @@ describe('ScannerController', () => {
   });
 
   describe('getReport', () => {
-    it('should return report by ID', async () => {
+    it('should return the client-safe report by ID', async () => {
       const result = await controller.getReport('report-123');
-      expect(mockReportService.getReport).toHaveBeenCalledWith('report-123');
+      expect(mockReportService.getClientReport).toHaveBeenCalledWith(
+        'report-123',
+      );
       expect(result).toHaveProperty('id', 'report-123');
+    });
+
+    it('should 404 for unknown reports', async () => {
+      (mockReportService.getClientReport as jest.Mock).mockResolvedValueOnce(
+        null,
+      );
+      await expect(controller.getReport('missing')).rejects.toThrow(
+        'Report not found',
+      );
     });
   });
 

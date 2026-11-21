@@ -1,4 +1,12 @@
-import { Controller, Get, HttpStatus, Res, Inject } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpStatus,
+  Res,
+  Inject,
+  UseGuards,
+} from '@nestjs/common';
+import { AdminGuard } from '../common/admin/admin.guard';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
@@ -49,6 +57,8 @@ export class HealthController {
     }
   }
 
+  // Exposes runtime details (Node version, pid, memory) — operators only.
+  @UseGuards(AdminGuard)
   @Get('detailed')
   @ApiOperation({ summary: 'Detailed health check with all system metrics' })
   @ApiResponse({ status: 200, description: 'Detailed health status' })
@@ -63,6 +73,7 @@ export class HealthController {
     }
   }
 
+  @UseGuards(AdminGuard)
   @Get('queue/stats')
   @ApiOperation({ summary: 'Queue statistics for load testing and monitoring' })
   @ApiResponse({ status: 200, description: 'Queue statistics' })

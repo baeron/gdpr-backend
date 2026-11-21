@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as tls from 'tls';
 import * as https from 'https';
 import { RiskLevel, ScanIssue } from '../dto/scan-result.dto';
+import { publicOnlyLookup } from '../../common/net/public-address';
 
 export interface SslCertificateInfo {
   valid: boolean;
@@ -81,6 +82,8 @@ export class SslAnalyzer {
         path: '/',
         rejectUnauthorized: false, // Allow self-signed for inspection
         timeout: 8000,
+        // SSRF guard: never open a socket to a private/loopback address.
+        lookup: publicOnlyLookup as unknown as https.RequestOptions['lookup'],
       };
 
       const req = https.request(options, (res) => {
@@ -152,7 +155,9 @@ export class SslAnalyzer {
           cipher: cipherInfo?.name || null,
           keyExchange: null,
           selfSigned,
-          error: authorized ? null : (String(socket.authorizationError) || 'Certificate not trusted'),
+          error: authorized
+            ? null
+            : String(socket.authorizationError) || 'Certificate not trusted',
         });
 
         res.destroy();
@@ -199,7 +204,7 @@ export class SslAnalyzer {
           'The website uses a self-signed SSL certificate, which browsers will flag as untrusted.',
         riskLevel: RiskLevel.HIGH,
         recommendation:
-          'Obtain a valid SSL certificate from a trusted Certificate Authority (e.g., Let\'s Encrypt).',
+          "Obtain a valid SSL certificate from a trusted Certificate Authority (e.g., Let's Encrypt).",
       });
     }
 

@@ -10,9 +10,13 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+// queue/stats is an admin endpoint; pass ADMIN_API_TOKEN when the target enforces it.
+const ADMIN_HEADERS = __ENV.ADMIN_API_TOKEN
+  ? { Authorization: `Bearer ${__ENV.ADMIN_API_TOKEN}` }
+  : {};
 
 export default function () {
-  const res = http.get(`${BASE_URL}/api/health/queue/stats`);
+  const res = http.get(`${BASE_URL}/api/health/queue/stats`, { headers: ADMIN_HEADERS });
   
   check(res, {
     'status is 200': (r) => r.status === 200,
@@ -39,7 +43,7 @@ export function setup() {
   console.log(`Testing queue stats endpoint: ${BASE_URL}/api/health/queue/stats`);
   
   // Verify endpoint exists
-  const res = http.get(`${BASE_URL}/api/health/queue/stats`);
+  const res = http.get(`${BASE_URL}/api/health/queue/stats`, { headers: ADMIN_HEADERS });
   if (res.status !== 200) {
     throw new Error(`Queue stats endpoint not available: ${res.status}`);
   }

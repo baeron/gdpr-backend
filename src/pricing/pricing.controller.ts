@@ -1,7 +1,17 @@
-import { Controller, Get, Post, Req, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Req,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { PricingService } from './pricing.service';
 import { GeoService } from './geo.service';
+import type { PricingRegion } from '@prisma/client';
+import { AdminGuard } from '../common/admin/admin.guard';
 
 @Controller('pricing')
 export class PricingController {
@@ -17,11 +27,14 @@ export class PricingController {
   @Get('current')
   async getCurrentPricing(@Req() req: Request) {
     const clientIp = this.geoService.getClientIP(req);
-    const geoData = await this.geoService.getGeoFromIP(clientIp, req.headers as any);
-    
-    const region = geoData 
+    const geoData = await this.geoService.getGeoFromIP(
+      clientIp,
+      req.headers as any,
+    );
+
+    const region = geoData
       ? this.pricingService.getRegionFromCountry(geoData.country)
-      : ('OTHER' as any);
+      : ('OTHER' as PricingRegion);
 
     const pricing = await this.pricingService.getCurrentPricing(region);
 
@@ -45,9 +58,10 @@ export class PricingController {
   }
 
   /**
-   * Get campaign analytics (admin only - should add auth guard)
+   * Get campaign analytics (admin only)
    * GET /pricing/analytics
    */
+  @UseGuards(AdminGuard)
   @Get('analytics')
   async getAnalytics() {
     return this.pricingService.getCampaignAnalytics();
@@ -57,6 +71,7 @@ export class PricingController {
    * Initialize counters from database (admin only)
    * POST /pricing/init
    */
+  @UseGuards(AdminGuard)
   @Post('init')
   @HttpCode(HttpStatus.OK)
   async initializeCounters() {
@@ -65,9 +80,10 @@ export class PricingController {
   }
 
   /**
-   * Reset all counters (admin only - should add auth guard)
+   * Reset all counters (admin only)
    * POST /pricing/reset
    */
+  @UseGuards(AdminGuard)
   @Post('reset')
   @HttpCode(HttpStatus.OK)
   async resetCounters() {

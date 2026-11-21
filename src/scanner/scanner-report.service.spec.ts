@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call --
+   Prisma is replaced by an untyped jest mock in this spec; asserting on
+   mock.calls is inherently `any`. */
 import { ScannerReportService } from './scanner-report.service';
 import { RiskLevel, ScanResultDto } from './dto/scan-result.dto';
 
@@ -5,51 +8,176 @@ describe('ScannerReportService', () => {
   let service: ScannerReportService;
   let mockPrisma: any;
 
-  const makeScanResult = (overrides: Partial<ScanResultDto> = {}): ScanResultDto => ({
+  const makeScanResult = (
+    overrides: Partial<ScanResultDto> = {},
+  ): ScanResultDto => ({
     websiteUrl: 'https://example.com',
     scanDate: new Date('2026-01-01'),
     scanDurationMs: 5000,
     overallRiskLevel: RiskLevel.MEDIUM,
     score: 65,
-    cookies: { total: 2, beforeConsent: 1, list: [
-      { name: '_ga', domain: '.example.com', path: '/', expires: '2027-01-01', httpOnly: false, secure: true, sameSite: 'Lax', category: 'analytics', setBeforeConsent: true },
-    ] },
-    trackers: { total: 1, beforeConsent: 1, list: [
-      { name: 'Google Analytics', domain: 'google-analytics.com', type: 'analytics', loadedBeforeConsent: true },
-    ] },
+    cookies: {
+      total: 2,
+      beforeConsent: 1,
+      list: [
+        {
+          name: '_ga',
+          domain: '.example.com',
+          path: '/',
+          expires: '2027-01-01',
+          httpOnly: false,
+          secure: true,
+          sameSite: 'Lax',
+          category: 'analytics',
+          setBeforeConsent: true,
+        },
+      ],
+    },
+    trackers: {
+      total: 1,
+      beforeConsent: 1,
+      list: [
+        {
+          name: 'Google Analytics',
+          domain: 'google-analytics.com',
+          type: 'analytics',
+          loadedBeforeConsent: true,
+        },
+      ],
+    },
     thirdPartyRequests: { total: 5, beforeConsent: 2, list: [] },
     consentBanner: {
-      found: true, hasRejectButton: false, hasAcceptButton: true, hasSettingsOption: true, isBlocking: false,
-      quality: { hasPreCheckedBoxes: false, preCheckedCategories: [], hasEqualProminence: false, acceptButtonSize: null, rejectButtonSize: null, isCookieWall: false, hasGranularConsent: true, categoryCount: 0, closeButtonRejects: null },
-      tcf: { detected: false, version: null, cmpId: null, cmpVersion: null, gdprApplies: null, purposeConsents: [], vendorConsents: [] },
+      found: true,
+      hasRejectButton: false,
+      hasAcceptButton: true,
+      hasSettingsOption: true,
+      isBlocking: false,
+      quality: {
+        hasPreCheckedBoxes: false,
+        preCheckedCategories: [],
+        hasEqualProminence: false,
+        acceptButtonSize: null,
+        rejectButtonSize: null,
+        isCookieWall: false,
+        hasGranularConsent: true,
+        categoryCount: 0,
+        closeButtonRejects: null,
+      },
+      tcf: {
+        detected: false,
+        version: null,
+        cmpId: null,
+        cmpVersion: null,
+        gdprApplies: null,
+        purposeConsents: [],
+        vendorConsents: [],
+      },
     },
     privacyPolicy: {
-      found: true, url: 'https://example.com/privacy',
-      content: { analyzed: true, hasDataController: true, hasDPOContact: false, hasPurposeOfProcessing: true, hasLegalBasis: true, hasDataRetention: false, hasUserRights: true, hasRightToComplain: false, hasThirdPartySharing: false, hasInternationalTransfers: false, detectedElements: [], missingElements: ['DPO Contact'] },
+      found: true,
+      url: 'https://example.com/privacy',
+      content: {
+        analyzed: true,
+        hasDataController: true,
+        hasDPOContact: false,
+        hasPurposeOfProcessing: true,
+        hasLegalBasis: true,
+        hasDataRetention: false,
+        hasUserRights: true,
+        hasRightToComplain: false,
+        hasThirdPartySharing: false,
+        hasInternationalTransfers: false,
+        detectedElements: [],
+        missingElements: ['DPO Contact'],
+      },
     },
     security: {
       https: { enabled: true, redirectsToHttps: true },
       mixedContent: { found: false, resources: [] },
-      cookieSecurity: { withoutSecure: 0, withoutHttpOnly: 1, withoutSameSite: 0, excessiveExpiration: 0, issues: [] },
+      cookieSecurity: {
+        withoutSecure: 0,
+        withoutHttpOnly: 1,
+        withoutSameSite: 0,
+        excessiveExpiration: 0,
+        issues: [],
+      },
     },
     securityHeaders: {
-      headers: {}, csp: { present: true, value: "default-src 'self'", hasDefaultSrc: true, hasScriptSrc: false, hasUnsafeInline: false, hasUnsafeEval: false },
-      hsts: { present: true, value: 'max-age=31536000', maxAge: 31536000, includesSubDomains: false, preload: false },
-      xFrameOptions: { present: true, value: 'DENY' }, xContentTypeOptions: { present: true, value: 'nosniff' },
-      referrerPolicy: { present: true, value: 'strict-origin' }, permissionsPolicy: { present: false, value: null },
-      missingHeaders: ['Permissions-Policy'], score: 70,
+      headers: {},
+      csp: {
+        present: true,
+        value: "default-src 'self'",
+        hasDefaultSrc: true,
+        hasScriptSrc: false,
+        hasUnsafeInline: false,
+        hasUnsafeEval: false,
+      },
+      hsts: {
+        present: true,
+        value: 'max-age=31536000',
+        maxAge: 31536000,
+        includesSubDomains: false,
+        preload: false,
+      },
+      xFrameOptions: { present: true, value: 'DENY' },
+      xContentTypeOptions: { present: true, value: 'nosniff' },
+      referrerPolicy: { present: true, value: 'strict-origin' },
+      permissionsPolicy: { present: false, value: null },
+      missingHeaders: ['Permissions-Policy'],
+      score: 70,
     },
     sslCertificate: {
-      valid: true, issuer: "Let's Encrypt", subject: 'example.com',
-      validFrom: '2025-01-01', validTo: '2026-06-01', daysUntilExpiry: 150,
-      protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384', keyExchange: null, selfSigned: false, error: null,
+      valid: true,
+      issuer: "Let's Encrypt",
+      subject: 'example.com',
+      validFrom: '2025-01-01',
+      validTo: '2026-06-01',
+      daysUntilExpiry: 150,
+      protocol: 'TLSv1.3',
+      cipher: 'TLS_AES_256_GCM_SHA384',
+      keyExchange: null,
+      selfSigned: false,
+      error: null,
     },
-    forms: { totalForms: 1, dataCollectionForms: 1, formsWithConsent: 0, formsWithoutConsent: 1, formsWithPreCheckedMarketing: 0, formsWithPrivacyLink: 0, forms: [], pagesScanned: [] },
-    dataTransfers: { usServicesDetected: [], totalUSServices: 0, highRiskTransfers: ['Google Analytics'] },
-    technologies: { technologies: [], cms: null, framework: null, consentPlatform: null, analytics: [], advertising: [], cdn: null },
+    forms: {
+      totalForms: 1,
+      dataCollectionForms: 1,
+      formsWithConsent: 0,
+      formsWithoutConsent: 1,
+      formsWithPreCheckedMarketing: 0,
+      formsWithPrivacyLink: 0,
+      forms: [],
+      pagesScanned: [],
+    },
+    dataTransfers: {
+      usServicesDetected: [],
+      totalUSServices: 0,
+      highRiskTransfers: ['Google Analytics'],
+    },
+    technologies: {
+      technologies: [],
+      cms: null,
+      framework: null,
+      consentPlatform: null,
+      analytics: [],
+      advertising: [],
+      cdn: null,
+    },
     issues: [
-      { code: 'NO_REJECT_OPTION', title: 'No Reject', description: 'desc', riskLevel: RiskLevel.HIGH, recommendation: 'rec' },
-      { code: 'FORMS_WITHOUT_CONSENT', title: 'Forms', description: 'desc', riskLevel: RiskLevel.MEDIUM, recommendation: 'rec' },
+      {
+        code: 'NO_REJECT_OPTION',
+        title: 'No Reject',
+        description: 'desc',
+        riskLevel: RiskLevel.HIGH,
+        recommendation: 'rec',
+      },
+      {
+        code: 'FORMS_WITHOUT_CONSENT',
+        title: 'Forms',
+        description: 'desc',
+        riskLevel: RiskLevel.MEDIUM,
+        recommendation: 'rec',
+      },
     ],
     ...overrides,
   });
@@ -62,7 +190,9 @@ describe('ScannerReportService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       scanIssue: {
-        update: jest.fn().mockResolvedValue({ id: 'issue-1', status: 'RESOLVED' }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ id: 'issue-1', status: 'RESOLVED' }),
       },
     };
     service = new ScannerReportService(mockPrisma);
@@ -83,7 +213,9 @@ describe('ScannerReportService', () => {
     });
 
     it('should map risk levels correctly', async () => {
-      await service.saveScanResult(makeScanResult({ overallRiskLevel: RiskLevel.CRITICAL }));
+      await service.saveScanResult(
+        makeScanResult({ overallRiskLevel: RiskLevel.CRITICAL }),
+      );
       const createCall = mockPrisma.auditReport.create.mock.calls[0][0];
       expect(createCall.data.riskLevel).toBe('CRITICAL');
     });
@@ -115,82 +247,163 @@ describe('ScannerReportService', () => {
 
     it('should generate evidence for COOKIES_BEFORE_CONSENT', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'COOKIES_BEFORE_CONSENT', title: 'T', description: 'D', riskLevel: RiskLevel.HIGH, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'COOKIES_BEFORE_CONSENT',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.HIGH,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('_ga');
     });
 
     it('should generate evidence for TRACKERS_BEFORE_CONSENT', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'TRACKERS_BEFORE_CONSENT', title: 'T', description: 'D', riskLevel: RiskLevel.HIGH, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'TRACKERS_BEFORE_CONSENT',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.HIGH,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('Google Analytics');
     });
 
     it('should generate evidence for PRIVACY_POLICY_INCOMPLETE', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'PRIVACY_POLICY_INCOMPLETE', title: 'T', description: 'D', riskLevel: RiskLevel.MEDIUM, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'PRIVACY_POLICY_INCOMPLETE',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.MEDIUM,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('DPO Contact');
     });
 
     it('should generate evidence for US_DATA_TRANSFERS', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'US_DATA_TRANSFERS', title: 'T', description: 'D', riskLevel: RiskLevel.HIGH, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'US_DATA_TRANSFERS',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.HIGH,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('Google Analytics');
     });
 
     it('should generate evidence for NO_HTTPS', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'NO_HTTPS', title: 'T', description: 'D', riskLevel: RiskLevel.HIGH, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'NO_HTTPS',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.HIGH,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('HTTPS');
     });
 
     it('should generate evidence for MIXED_CONTENT', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'MIXED_CONTENT', title: 'T', description: 'D', riskLevel: RiskLevel.MEDIUM, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'MIXED_CONTENT',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.MEDIUM,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('HTTP');
     });
 
     it('should generate evidence for NO_PRIVACY_POLICY', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'NO_PRIVACY_POLICY', title: 'T', description: 'D', riskLevel: RiskLevel.HIGH, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'NO_PRIVACY_POLICY',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.HIGH,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('privacy policy');
     });
 
     it('should generate evidence for UNEQUAL_BUTTON_PROMINENCE', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'UNEQUAL_BUTTON_PROMINENCE', title: 'T', description: 'D', riskLevel: RiskLevel.MEDIUM, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'UNEQUAL_BUTTON_PROMINENCE',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.MEDIUM,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toContain('prominent');
     });
 
     it('should return empty evidence for unknown issue code', async () => {
       const result = makeScanResult({
-        issues: [{ code: 'UNKNOWN_CODE', title: 'T', description: 'D', riskLevel: RiskLevel.LOW, recommendation: 'R' }],
+        issues: [
+          {
+            code: 'UNKNOWN_CODE',
+            title: 'T',
+            description: 'D',
+            riskLevel: RiskLevel.LOW,
+            recommendation: 'R',
+          },
+        ],
       });
       await service.saveScanResult(result);
-      const issues = mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
+      const issues =
+        mockPrisma.auditReport.create.mock.calls[0][0].data.issues.create;
       expect(issues[0].evidence).toBe('');
       expect(issues[0].category).toBe('OTHER');
     });
@@ -202,6 +415,94 @@ describe('ScannerReportService', () => {
       expect(mockPrisma.auditReport.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'report-123' } }),
       );
+    });
+
+    it('never joins the audit request (email, consent)', async () => {
+      await service.getReport('report-123');
+      const args = mockPrisma.auditReport.findUnique.mock.calls[0][0];
+      expect(args.include.auditRequest).toBeUndefined();
+    });
+  });
+
+  describe('getClientReport', () => {
+    const storedReport = (unlocked: boolean) => ({
+      id: 'report-123',
+      websiteUrl: 'https://example.com',
+      overallScore: 42,
+      riskLevel: 'HIGH',
+      scanDurationMs: 1234,
+      scannedAt: new Date('2026-11-01'),
+      fullReportUnlocked: unlocked,
+      auditRequestId: 'audit-1',
+      cookies: { total: 3, list: [{ name: '_ga' }] },
+      trackers: { total: 1 },
+      issues: [
+        {
+          id: 'issue-1',
+          code: 'NO_REJECT_OPTION',
+          category: 'CONSENT',
+          title: 'No Reject',
+          description: 'paid description',
+          riskLevel: 'HIGH',
+          evidence: 'paid evidence',
+          recommendation: 'paid recommendation',
+          codeExample: '<paid/>',
+          effortHours: '1-2',
+          estimatedCost: '€100',
+        },
+      ],
+    });
+
+    it('returns null for unknown reports', async () => {
+      mockPrisma.auditReport.findUnique.mockResolvedValueOnce(null);
+      expect(await service.getClientReport('missing')).toBeNull();
+    });
+
+    it('returns only a preview while the report is locked', async () => {
+      mockPrisma.auditReport.findUnique.mockResolvedValueOnce(
+        storedReport(false),
+      );
+      const res = await service.getClientReport('report-123');
+      expect(res).toEqual({
+        id: 'report-123',
+        websiteUrl: 'https://example.com',
+        overallScore: 42,
+        riskLevel: 'HIGH',
+        scanDurationMs: 1234,
+        scannedAt: new Date('2026-11-01'),
+        fullReportUnlocked: false,
+        locked: true,
+        issues: [
+          {
+            id: 'issue-1',
+            code: 'NO_REJECT_OPTION',
+            category: 'CONSENT',
+            title: 'No Reject',
+            riskLevel: 'HIGH',
+          },
+        ],
+      });
+      const json = JSON.stringify(res);
+      for (const paid of ['paid', 'cookies', 'trackers', 'auditRequest']) {
+        expect(json).not.toContain(paid);
+      }
+    });
+
+    it('returns the full report once unlocked', async () => {
+      mockPrisma.auditReport.findUnique.mockResolvedValueOnce(
+        storedReport(true),
+      );
+      const res = await service.getClientReport('report-123');
+      expect(res).toMatchObject({
+        locked: false,
+        fullReportUnlocked: true,
+        cookies: { total: 3 },
+      });
+      expect(res?.issues[0]).toHaveProperty(
+        'recommendation',
+        'paid recommendation',
+      );
+      expect(res).not.toHaveProperty('auditRequest');
     });
   });
 

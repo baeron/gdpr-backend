@@ -14,6 +14,7 @@ import { CreateAuditDto } from './dto/create-audit.dto';
 import { AuditResponseDto } from './dto/audit-response.dto';
 import { TurnstileGuard } from '../common/turnstile/turnstile.guard';
 import { Idempotent } from '../common/idempotency/idempotency.interceptor';
+import { AdminGuard } from '../common/admin/admin.guard';
 
 @Controller('audit')
 export class AuditController {
@@ -33,6 +34,8 @@ export class AuditController {
     return this.auditService.createAuditRequest(dto);
   }
 
+  // Returns the requester's email and consent flags — operators only.
+  @UseGuards(AdminGuard)
   @Get(':id')
   async getAudit(@Param('id') id: string) {
     const audit = await this.auditService.getAuditRequest(id);

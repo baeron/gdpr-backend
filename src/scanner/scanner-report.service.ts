@@ -2,6 +2,31 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScanResultDto, RiskLevel } from './dto/scan-result.dto';
 
+type FullReport = NonNullable<
+  Awaited<ReturnType<ScannerReportService['getReport']>>
+>;
+
+export type PreviewIssue = Pick<
+  FullReport['issues'][number],
+  'id' | 'code' | 'category' | 'title' | 'riskLevel'
+>;
+
+export type ClientReport =
+  | (FullReport & { locked: false })
+  | (Pick<
+      FullReport,
+      | 'id'
+      | 'websiteUrl'
+      | 'overallScore'
+      | 'riskLevel'
+      | 'scanDurationMs'
+      | 'scannedAt'
+    > & {
+      fullReportUnlocked: false;
+      locked: true;
+      issues: PreviewIssue[];
+    });
+
 // Issue category mapping
 const ISSUE_CATEGORY_MAP: Record<string, string> = {
   COOKIES_BEFORE_CONSENT: 'COOKIES',
@@ -102,7 +127,8 @@ export class ScannerReportService {
     // domain objects (CookieInfo[], FormInfo[], …), but Prisma's Json
     // columns demand types with an index signature. The runtime data
     // is JSON-serialisable; the cast is purely a TS-level escape.
-    const report = await (this.prisma.auditReport as any).create({
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const report = (await (this.prisma.auditReport as any).create({
       data: {
         auditRequestId: auditRequestId ?? undefined,
         websiteUrl: scanResult.websiteUrl,
@@ -137,7 +163,7 @@ export class ScannerReportService {
       include: {
         issues: true,
       },
-    });
+    })) as { id: string; issues: unknown[] };
 
     this.logger.log(
       `Saved report ${report.id} with ${report.issues.length} issues`,
@@ -145,6 +171,10 @@ export class ScannerReportService {
     return report.id;
   }
 
+  /**
+   * Internal accessor: full report row with issues. NEVER return this
+   * straight to an HTTP client — use getClientReport().
+   */
   async getReport(reportId: string) {
     return this.prisma.auditReport.findUnique({
       where: { id: reportId },
@@ -152,9 +182,46 @@ export class ScannerReportService {
         issues: {
           orderBy: [{ riskLevel: 'desc' }, { category: 'asc' }],
         },
-        auditRequest: true,
       },
     });
+  }
+
+  /**
+   * Report as served to the (anonymous) client that holds the report id.
+   *
+   * - Never includes the AuditRequest (email, consent flags).
+   * - Until the report is paid for (`fullReportUnlocked`), returns a
+   *   preview only: score, risk level and issue headlines. The paid
+   *   content — descriptions, evidence, recommendations, code examples,
+   *   effort/cost estimates and the raw scan data — stays on the server.
+   *
+   * Returns `null` when the report does not exist.
+   */
+  async getClientReport(reportId: string): Promise<ClientReport | null> {
+    const report = await this.getReport(reportId);
+    if (!report) return null;
+
+    if (report.fullReportUnlocked) {
+      return { ...report, locked: false };
+    }
+
+    return {
+      id: report.id,
+      websiteUrl: report.websiteUrl,
+      overallScore: report.overallScore,
+      riskLevel: report.riskLevel,
+      scanDurationMs: report.scanDurationMs,
+      scannedAt: report.scannedAt,
+      fullReportUnlocked: false,
+      locked: true,
+      issues: report.issues.map((issue) => ({
+        id: issue.id,
+        code: issue.code,
+        category: issue.category,
+        title: issue.title,
+        riskLevel: issue.riskLevel,
+      })),
+    };
   }
 
   async getReportByAuditRequest(auditRequestId: string) {

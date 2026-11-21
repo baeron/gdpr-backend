@@ -104,6 +104,11 @@ ADMIN_EMAIL=<email>
 STRIPE_SECRET_KEY=<sk_live_... или sk_test_...>
 STRIPE_WEBHOOK_SECRET=<whsec_...>
 
+# --- Admin API (operator-only endpoints) ---
+# Пустое значение в production = админские эндпоинты отдают 403.
+# Сгенерировать: openssl rand -hex 32
+ADMIN_API_TOKEN=<secret>
+
 # --- Cloudflare Turnstile (captcha) ---
 # Без этого POST /scanner/scan fails closed в production
 TURNSTILE_SECRET_KEY=<secret>
@@ -278,3 +283,5 @@ docker compose --env-file .env.production --profile redis up -d
 - [ ] Postgres backup настроен (cron)
 - [ ] `TURNSTILE_SECRET_KEY` заполнен (иначе scan endpoint не работает)
 - [ ] `SENTRY_DSN` заполнен (иначе ошибки не улетают)
+- [ ] `ADMIN_API_TOKEN` заполнен (иначе админские эндпоинты закрыты)
+- [ ] `curl https://<домен>/api/v1/pricing/analytics` без токена → 401/403
