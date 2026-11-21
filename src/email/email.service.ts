@@ -278,7 +278,9 @@ export class EmailService {
     let attachments: EmailAttachment[] | undefined;
     if (params.scanResult && this.pdfReportService) {
       try {
-        const upgradeUrl = `https://policytracker.eu/report/${params.reportId}?upgrade=true`;
+        const upgradeUrl =
+          params.reportUrl ??
+          `https://policytracker.eu/en/report/full/${params.reportId}`;
         const pdfBuffer = await this.pdfReportService.generateReport(
           params.scanResult,
           { mode: 'free', upgradeUrl, reportId: params.reportId },

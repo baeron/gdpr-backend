@@ -1,4 +1,6 @@
-import { PaymentService } from './payment.service';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await --
+ * Stripe/Prisma are hand-rolled jest mocks; private handlers are reached via `any`. */
+import { PaymentService, WebhookSignatureError } from './payment.service';
 import { ConfigService } from '@nestjs/config';
 
 describe('PaymentService', () => {
@@ -78,7 +80,20 @@ describe('PaymentService', () => {
     });
 
     it('should return EU pricing for various EU countries', () => {
-      const euCountries = ['fr', 'it', 'es', 'nl', 'be', 'at', 'pl', 'pt', 'ie', 'se', 'fi', 'dk'];
+      const euCountries = [
+        'fr',
+        'it',
+        'es',
+        'nl',
+        'be',
+        'at',
+        'pl',
+        'pt',
+        'ie',
+        'se',
+        'fi',
+        'dk',
+      ];
       for (const country of euCountries) {
         const pricing = service.getPricing(country, 'A');
         expect(pricing.currency).toBe('eur');
@@ -193,9 +208,7 @@ describe('PaymentService', () => {
       const reserveSlot = jest
         .fn()
         .mockResolvedValue({ slotNumber: 1, price: 1 });
-      const recordPurchase = jest
-        .fn()
-        .mockRejectedValue(new Error('boom'));
+      const recordPurchase = jest.fn().mockRejectedValue(new Error('boom'));
 
       const svc = new PaymentService(
         { get: jest.fn().mockReturnValue('sk_test') } as any,
@@ -269,6 +282,7 @@ describe('PaymentService', () => {
       await (svc as any).handleCheckoutCompleted({
         id: 'sess_1',
         payment_intent: 'pi_1',
+        payment_status: 'paid',
         metadata: {
           reportId: 'report-1',
           paymentId: 'pay-1',
@@ -285,19 +299,17 @@ describe('PaymentService', () => {
     });
 
     it('does not partially update when one write fails', async () => {
-      const txSpy = jest
-        .fn()
-        .mockImplementation(async (cb: any) => {
-          // Simulate Prisma rolling back the whole transaction on error.
-          const tx = {
-            payment: { update: jest.fn().mockResolvedValue({}) },
-            auditReport: {
-              update: jest.fn().mockRejectedValue(new Error('DB down')),
-            },
-            launchPurchase: { update: jest.fn() },
-          };
-          return cb(tx);
-        });
+      const txSpy = jest.fn().mockImplementation(async (cb: any) => {
+        // Simulate Prisma rolling back the whole transaction on error.
+        const tx = {
+          payment: { update: jest.fn().mockResolvedValue({}) },
+          auditReport: {
+            update: jest.fn().mockRejectedValue(new Error('DB down')),
+          },
+          launchPurchase: { update: jest.fn() },
+        };
+        return cb(tx);
+      });
 
       const prisma: any = { ...mockPrisma, $transaction: txSpy };
       const svc = new PaymentService(
@@ -309,6 +321,7 @@ describe('PaymentService', () => {
         (svc as any).handleCheckoutCompleted({
           id: 'sess_1',
           payment_intent: 'pi_1',
+          payment_status: 'paid',
           metadata: { reportId: 'report-1', paymentId: 'pay-1' },
         }),
       ).rejects.toThrow('DB down');
@@ -330,7 +343,9 @@ describe('PaymentService', () => {
     });
 
     it('should return true when report is unlocked', async () => {
-      mockPrisma.auditReport.findUnique.mockResolvedValue({ fullReportUnlocked: true });
+      mockPrisma.auditReport.findUnique.mockResolvedValue({
+        fullReportUnlocked: true,
+      });
       const result = await service.isReportUnlocked('report-1');
       expect(result).toBe(true);
     });
@@ -339,6 +354,178 @@ describe('PaymentService', () => {
       mockPrisma.auditReport.findUnique.mockResolvedValue(null);
       const result = await service.isReportUnlocked('nonexistent');
       expect(result).toBe(false);
+    });
+  });
+
+  describe('handleWebhook', () => {
+    const paidSession = {
+      id: 'cs_1',
+      payment_intent: 'pi_1',
+      payment_status: 'paid',
+      amount_total: 999,
+      currency: 'eur',
+      customer_details: { email: 'buyer@example.com' },
+      metadata: { reportId: 'report-1', paymentId: 'pay-1' },
+    };
+
+    function build(
+      opts: {
+        event?: any;
+        secret?: string | undefined;
+        constructEvent?: jest.Mock;
+        createEvent?: jest.Mock;
+      } = {},
+    ) {
+      const tx = {
+        payment: { update: jest.fn().mockResolvedValue({}) },
+        auditReport: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const prisma: any = {
+        payment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        auditReport: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ websiteUrl: 'https://shop.example' }),
+        },
+        scanJob: { findFirst: jest.fn().mockResolvedValue({ locale: 'de' }) },
+        stripeWebhookEvent: {
+          create: opts.createEvent ?? jest.fn().mockResolvedValue({}),
+          delete: jest.fn().mockResolvedValue({}),
+        },
+        $transaction: jest.fn(async (cb: any) => cb(tx)),
+      };
+      const email: any = {
+        sendPaymentConfirmation: jest.fn().mockResolvedValue(true),
+      };
+      const config: any = {
+        get: jest.fn((k: string) =>
+          k === 'STRIPE_WEBHOOK_SECRET'
+            ? 'secret' in opts
+              ? opts.secret
+              : 'whsec_test'
+            : 'sk_test',
+        ),
+      };
+      const svc = new PaymentService(
+        config,
+        prisma,
+        undefined,
+        undefined,
+        email,
+      );
+      const event = opts.event ?? {
+        id: 'evt_1',
+        type: 'checkout.session.completed',
+        data: { object: paidSession },
+      };
+      (svc as any).stripe = {
+        webhooks: {
+          constructEvent:
+            opts.constructEvent ?? jest.fn().mockReturnValue(event),
+        },
+      };
+      return { svc, prisma, tx, email };
+    }
+
+    it('unlocks the report and sends a localized confirmation', async () => {
+      const { svc, tx, email, prisma } = build();
+      await svc.handleWebhook(Buffer.from('{}'), 'sig');
+
+      expect(prisma.stripeWebhookEvent.create).toHaveBeenCalledWith({
+        data: { id: 'evt_1', type: 'checkout.session.completed' },
+      });
+      expect(tx.auditReport.update).toHaveBeenCalledWith({
+        where: { id: 'report-1' },
+        data: { fullReportUnlocked: true },
+      });
+      expect(email.sendPaymentConfirmation).toHaveBeenCalledWith(
+        'buyer@example.com',
+        expect.objectContaining({
+          reportId: 'report-1',
+          websiteUrl: 'https://shop.example',
+          amount: '9.99',
+          currency: 'eur',
+          locale: 'de',
+          reportUrl: 'https://policytracker.eu/de/report/full/report-1',
+        }),
+      );
+    });
+
+    it('skips a redelivered event without touching the report', async () => {
+      const dup = Object.assign(new Error('unique'), { code: 'P2002' });
+      const { svc, tx, email } = build({
+        createEvent: jest.fn().mockRejectedValue(dup),
+      });
+      await svc.handleWebhook(Buffer.from('{}'), 'sig');
+      expect(tx.auditReport.update).not.toHaveBeenCalled();
+      expect(email.sendPaymentConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('does not unlock while an async payment is still unpaid', async () => {
+      const { svc, tx } = build({
+        event: {
+          id: 'evt_2',
+          type: 'checkout.session.completed',
+          data: { object: { ...paidSession, payment_status: 'unpaid' } },
+        },
+      });
+      await svc.handleWebhook(Buffer.from('{}'), 'sig');
+      expect(tx.auditReport.update).not.toHaveBeenCalled();
+    });
+
+    it('raises WebhookSignatureError on a bad signature', async () => {
+      const { svc, prisma } = build({
+        constructEvent: jest.fn(() => {
+          throw new Error('No signatures found');
+        }),
+      });
+      await expect(
+        svc.handleWebhook(Buffer.from('{}'), 'bad'),
+      ).rejects.toBeInstanceOf(WebhookSignatureError);
+      expect(prisma.stripeWebhookEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses to verify without a webhook secret', async () => {
+      const { svc } = build({ secret: undefined });
+      await expect(svc.handleWebhook(Buffer.from('{}'), 'sig')).rejects.toThrow(
+        'STRIPE_WEBHOOK_SECRET is not configured',
+      );
+    });
+
+    it('releases the event claim when processing fails so Stripe can retry', async () => {
+      const { svc, prisma } = build();
+      prisma.$transaction.mockRejectedValueOnce(new Error('DB down'));
+      await expect(svc.handleWebhook(Buffer.from('{}'), 'sig')).rejects.toThrow(
+        'DB down',
+      );
+      expect(prisma.stripeWebhookEvent.delete).toHaveBeenCalledWith({
+        where: { id: 'evt_1' },
+      });
+    });
+
+    it('keeps the unlock when the confirmation e-mail fails', async () => {
+      const { svc, tx, email, prisma } = build();
+      email.sendPaymentConfirmation.mockRejectedValueOnce(new Error('smtp'));
+      await expect(
+        svc.handleWebhook(Buffer.from('{}'), 'sig'),
+      ).resolves.toBeUndefined();
+      expect(tx.auditReport.update).toHaveBeenCalled();
+      expect(prisma.stripeWebhookEvent.delete).not.toHaveBeenCalled();
+    });
+
+    it('never downgrades a completed payment on a late expiry', async () => {
+      const { svc, prisma } = build({
+        event: {
+          id: 'evt_3',
+          type: 'checkout.session.expired',
+          data: { object: { ...paidSession, payment_status: 'unpaid' } },
+        },
+      });
+      await svc.handleWebhook(Buffer.from('{}'), 'sig');
+      expect(prisma.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay-1', status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
     });
   });
 });

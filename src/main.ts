@@ -77,7 +77,11 @@ async function bootstrap() {
     },
   });
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: Stripe signs the exact request bytes, so the webhook must
+  // verify against req.rawBody, never a re-serialised req.body.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   // Trust proxy is required for correct IP detection behind load balancers/reverse proxies
   // This is critical for ThrottlerGuard (rate limiting) to work per-IP rather than globally

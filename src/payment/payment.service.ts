@@ -1,10 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import Stripe from 'stripe';
+import type { PricingRegion } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
 import { GeoService } from '../pricing/geo.service';
+import { EmailService } from '../email/email.service';
+import { frontendUrl } from '../common/frontend-url';
+
+/** Raised when a webhook payload does not carry a valid Stripe signature. */
+export class WebhookSignatureError extends Error {}
+
+/** Checkout payment states that mean the money is in (or none was owed). */
+const SETTLED_PAYMENT_STATUSES = new Set(['paid', 'no_payment_required']);
 
 export interface PricingConfig {
   amount: number; // in cents
@@ -35,8 +44,9 @@ export class PaymentService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
-    private readonly pricingService?: PricingService,
-    private readonly geoService?: GeoService,
+    @Optional() private readonly pricingService?: PricingService,
+    @Optional() private readonly geoService?: GeoService,
+    @Optional() private readonly emailService?: EmailService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -79,15 +89,17 @@ export class PaymentService {
     city?: string;
     successUrl: string;
     cancelUrl: string;
-  }): Promise<{ 
-    sessionId: string; 
-    url: string; 
+  }): Promise<{
+    sessionId: string;
+    url: string;
     priceEur: number;
     region: string;
     slotNumber: number;
   }> {
     if (!this.stripe) {
-      throw new Error('Payment service not configured - STRIPE_SECRET_KEY missing');
+      throw new Error(
+        'Payment service not configured - STRIPE_SECRET_KEY missing',
+      );
     }
 
     if (!this.pricingService || !this.geoService) {
@@ -95,12 +107,12 @@ export class PaymentService {
     }
 
     // Determine region from country or IP
-    let region: any;
+    let region: PricingRegion;
     if (params.country) {
       region = this.pricingService.getRegionFromCountry(params.country);
     } else {
       const geoData = await this.geoService.getGeoFromIP(params.clientIp);
-      region = geoData 
+      region = geoData
         ? this.pricingService.getRegionFromCountry(geoData.country)
         : 'OTHER';
     }
@@ -307,36 +319,62 @@ export class PaymentService {
     const webhookSecret = this.configService.get<string>(
       'STRIPE_WEBHOOK_SECRET',
     );
+    if (!webhookSecret) {
+      // Config error, not a bad request: 5xx makes Stripe keep retrying
+      // until the secret is deployed instead of dropping the event.
+      throw new Error('STRIPE_WEBHOOK_SECRET is not configured');
+    }
 
     let event: Stripe.Event;
     try {
       event = this.stripe.webhooks.constructEvent(
         payload,
         signature,
-        webhookSecret || '',
+        webhookSecret,
       );
     } catch (err) {
       this.logger.error(
-        `Webhook signature verification failed: ${err.message}`,
+        `Webhook signature verification failed: ${(err as Error).message}`,
       );
-      throw new Error('Webhook signature verification failed');
+      throw new WebhookSignatureError('Webhook signature verification failed');
     }
 
-    this.logger.log(`Processing webhook event: ${event.type}`);
+    // Stripe delivers at-least-once. Claim the event id first so a
+    // redelivery (or a concurrent duplicate) is acknowledged without
+    // unlocking twice or sending a second confirmation e-mail.
+    try {
+      await this.prisma.stripeWebhookEvent.create({
+        data: { id: event.id, type: event.type },
+      });
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2002') {
+        this.logger.log(`Duplicate webhook event ${event.id}, skipping`);
+        return;
+      }
+      throw err;
+    }
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await this.handleCheckoutCompleted(
-          event.data.object as Stripe.Checkout.Session,
-        );
-        break;
-      case 'checkout.session.expired':
-        await this.handleCheckoutExpired(
-          event.data.object as Stripe.Checkout.Session,
-        );
-        break;
-      default:
-        this.logger.log(`Unhandled event type: ${event.type}`);
+    this.logger.log(`Processing webhook event ${event.id}: ${event.type}`);
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded':
+          await this.handleCheckoutCompleted(event.data.object);
+          break;
+        case 'checkout.session.expired':
+        case 'checkout.session.async_payment_failed':
+          await this.handleCheckoutExpired(event.data.object);
+          break;
+        default:
+          this.logger.log(`Unhandled event type: ${event.type}`);
+      }
+    } catch (err) {
+      // Release the claim so Stripe's redelivery is processed again.
+      await this.prisma.stripeWebhookEvent
+        .delete({ where: { id: event.id } })
+        .catch(() => undefined);
+      throw err;
     }
   }
 
@@ -379,8 +417,9 @@ export class PaymentService {
 
       return { success: false, error: 'Payment not completed' };
     } catch (error) {
-      this.logger.error(`Error verifying payment: ${error.message}`);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error verifying payment: ${message}`);
+      return { success: false, error: message };
     }
   }
 
@@ -405,7 +444,17 @@ export class PaymentService {
   private async handleCheckoutCompleted(
     session: Stripe.Checkout.Session,
   ): Promise<void> {
-    this.logger.log(`Checkout completed: ${session.id}`);
+    this.logger.log(
+      `Checkout completed: ${session.id} (payment_status=${session.payment_status})`,
+    );
+
+    // `completed` also fires for delayed payment methods before the money
+    // arrives (payment_status=unpaid); those unlock on
+    // async_payment_succeeded instead.
+    if (!SETTLED_PAYMENT_STATUSES.has(session.payment_status)) {
+      this.logger.log(`Session ${session.id} not paid yet, not unlocking`);
+      return;
+    }
 
     const reportId = session.metadata?.reportId;
     const paymentId = session.metadata?.paymentId;
@@ -456,6 +505,57 @@ export class PaymentService {
     }
     if (reportId) {
       this.logger.log(`Full report unlocked for: ${reportId}`);
+      await this.sendPaymentConfirmation(session, reportId);
+    }
+  }
+
+  /**
+   * Payment receipt with the link to the unlocked report. The link is the
+   * buyer's only way back to the report if they closed the success page,
+   * so it is sent from the webhook rather than the redirect. A mail
+   * failure is logged and never fails the webhook: the unlock is already
+   * committed and a retry would not re-send (the event is claimed).
+   */
+  private async sendPaymentConfirmation(
+    session: Stripe.Checkout.Session,
+    reportId: string,
+  ): Promise<void> {
+    if (!this.emailService) return;
+
+    try {
+      const to = session.customer_details?.email ?? session.customer_email;
+      if (!to) {
+        this.logger.warn(
+          `No buyer e-mail on session ${session.id}; confirmation not sent`,
+        );
+        return;
+      }
+
+      const [report, job] = await Promise.all([
+        this.prisma.auditReport.findUnique({
+          where: { id: reportId },
+          select: { websiteUrl: true },
+        }),
+        this.prisma.scanJob.findFirst({
+          where: { reportId },
+          select: { locale: true },
+        }),
+      ]);
+      const locale = job?.locale ?? 'en';
+
+      await this.emailService.sendPaymentConfirmation(to, {
+        reportId,
+        websiteUrl: report?.websiteUrl ?? '',
+        amount: ((session.amount_total ?? 0) / 100).toFixed(2),
+        currency: session.currency ?? 'eur',
+        paymentDate: new Date(),
+        locale,
+        reportUrl: frontendUrl(locale, `report/full/${reportId}`),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Payment confirmation e-mail for report ${reportId} failed: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -466,8 +566,11 @@ export class PaymentService {
 
     const paymentId = session.metadata?.paymentId;
     if (paymentId) {
-      await this.prisma.payment.update({
-        where: { id: paymentId },
+      // updateMany: a missing or already-completed row is not an error
+      // worth a Stripe retry loop, and a late `expired` must never
+      // downgrade a payment that already completed.
+      await this.prisma.payment.updateMany({
+        where: { id: paymentId, status: 'PENDING' },
         data: { status: 'EXPIRED' },
       });
     }

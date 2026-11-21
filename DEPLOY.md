@@ -102,6 +102,12 @@ ADMIN_EMAIL=<email>
 
 # --- Stripe ---
 STRIPE_SECRET_KEY=<sk_live_... или sk_test_...>
+# Секрет того webhook endpoint, что настроен в Stripe Dashboard:
+#   URL:     https://api.policytracker.eu/api/payment/webhook
+#   События: checkout.session.completed, checkout.session.expired,
+#            checkout.session.async_payment_succeeded,
+#            checkout.session.async_payment_failed
+# Без секрета webhook отвечает 500, и Stripe повторяет доставку.
 STRIPE_WEBHOOK_SECRET=<whsec_...>
 
 # --- Admin API (operator-only endpoints) ---
