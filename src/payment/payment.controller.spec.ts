@@ -45,6 +45,7 @@ describe('PaymentController', () => {
       expect(mockPaymentService.getPricing).toHaveBeenCalledWith(
         'en',
         undefined,
+        undefined,
       );
     });
   });
@@ -90,8 +91,33 @@ describe('PaymentController', () => {
     expect(mockPaymentService.createCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({
         successUrl: 'https://policytracker.eu/report/full/report-1',
-        cancelUrl: 'https://policytracker.eu/scan/report-1',
+        cancelUrl: 'https://policytracker.eu/report/full/report-1',
       }),
+    );
+  });
+
+  it('returns to the localized report page after pay or cancel', async () => {
+    await controller.createCheckout(
+      { reportId: 'report-1', locale: 'de', variant: 'B' },
+      'https://policytracker.eu',
+      { ip: '203.0.113.7' } as any,
+    );
+    expect(mockPaymentService.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'B',
+        clientKey: '203.0.113.7',
+        successUrl: 'https://policytracker.eu/de/report/full/report-1',
+        cancelUrl: 'https://policytracker.eu/de/report/full/report-1',
+      }),
+    );
+  });
+
+  it('passes the client IP so the A/B arm is stable per visitor', () => {
+    controller.getPricing('de', undefined, { ip: '198.51.100.1' } as any);
+    expect(mockPaymentService.getPricing).toHaveBeenCalledWith(
+      'de',
+      undefined,
+      '198.51.100.1',
     );
   });
 

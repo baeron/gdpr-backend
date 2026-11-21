@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -82,6 +82,19 @@ export class PaymentService {
       this.configService.get<string>('PRICE_AB_TEST_ENABLED') !== 'false';
   }
 
+  /**
+   * Stable A/B arm for a visitor without storing anything on their device:
+   * the parity of a salted hash of the client IP. The same visitor sees the
+   * same price on every page; the IP itself is never stored or logged.
+   */
+  private assignVariant(clientKey?: string): 'A' | 'B' {
+    if (!clientKey) return Math.random() < 0.5 ? 'A' : 'B';
+    const salt =
+      this.configService.get<string>('PRICE_AB_SALT') ?? 'policytracker-ab';
+    const digest = createHash('sha256').update(`${salt}:${clientKey}`).digest();
+    return digest[0] % 2 === 0 ? 'A' : 'B';
+  }
+
   /** Integer minor-unit price from env, or the default when unset/invalid. */
   private priceFromEnv(key: string, fallback: number): number {
     const raw = this.configService.get<string>(key);
@@ -99,18 +112,24 @@ export class PaymentService {
   /**
    * Get pricing based on region and A/B test variant
    */
-  getPricing(region: string, variant?: 'A' | 'B'): PricingConfig {
+  getPricing(
+    region: string,
+    variant?: 'A' | 'B',
+    clientKey?: string,
+  ): PricingConfig {
     const normalizedRegion = this.normalizeRegion(region);
     const pricing =
       this.pricingByRegion[normalizedRegion] || this.pricingByRegion.DEFAULT;
     const currency =
       this.currencyByRegion[normalizedRegion] || this.currencyByRegion.DEFAULT;
 
-    // Random A/B assignment if not specified. With the test switched off
-    // everyone gets A, whatever variant the client sends back.
+    // With the test switched off everyone gets A, whatever the client
+    // sends. Otherwise an explicit arm wins (checkout echoes the arm the
+    // page displayed), then a stable arm derived from the client key.
     const selectedVariant = !this.abTestEnabled
       ? 'A'
-      : variant || (Math.random() < 0.5 ? 'A' : 'B');
+      : (variant === 'A' || variant === 'B' ? variant : undefined) ||
+        this.assignVariant(clientKey);
 
     return {
       amount: pricing[selectedVariant],
@@ -127,6 +146,7 @@ export class PaymentService {
     userEmail?: string;
     region: string;
     variant?: 'A' | 'B';
+    clientKey?: string;
     successUrl: string;
     cancelUrl: string;
   }): Promise<{ sessionId: string; url: string; pricing: PricingConfig }> {
@@ -136,7 +156,11 @@ export class PaymentService {
       );
     }
 
-    const pricing = this.getPricing(params.region, params.variant);
+    const pricing = this.getPricing(
+      params.region,
+      params.variant,
+      params.clientKey,
+    );
 
     this.logger.log(
       `Creating checkout session for report ${params.reportId}, ` +
@@ -169,6 +193,12 @@ export class PaymentService {
           },
         ],
         mode: 'payment',
+        // The site promises an invoice with every purchase; Stripe e-mails
+        // it with the receipt. STRIPE_INVOICE_CREATION=false turns it off.
+        ...(this.configService.get<string>('STRIPE_INVOICE_CREATION') !==
+        'false'
+          ? { invoice_creation: { enabled: true } }
+          : {}),
         success_url: `${params.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: params.cancelUrl,
         customer_email: params.userEmail,

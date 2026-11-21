@@ -24,6 +24,7 @@ import {
 import { IsString, IsOptional, IsIn } from 'class-validator';
 import type { Request } from 'express';
 import { PaymentService, WebhookSignatureError } from './payment.service';
+import { EU_LOCALES } from '../email/i18n/types';
 
 // Stripe redirects back to the origin that started checkout. Only our own
 // frontends qualify, otherwise any caller could point the success/cancel
@@ -60,6 +61,15 @@ class CreateCheckoutDto {
   @IsOptional()
   @IsIn(['A', 'B'])
   variant?: 'A' | 'B';
+
+  @ApiProperty({
+    description: 'Site locale; Stripe redirects back to /<locale>/…',
+    required: false,
+    enum: EU_LOCALES,
+  })
+  @IsOptional()
+  @IsIn(EU_LOCALES as unknown as string[])
+  locale?: string;
 }
 
 @ApiTags('payment')
@@ -77,6 +87,7 @@ export class PaymentController {
   async createCheckout(
     @Body() body: CreateCheckoutDto,
     @Headers('origin') origin: string,
+    @Req() req?: Request,
   ) {
     if (!body.reportId) {
       throw new BadRequestException('reportId is required');
@@ -84,14 +95,20 @@ export class PaymentController {
 
     const baseUrl =
       origin && CHECKOUT_ORIGINS.has(origin) ? origin : DEFAULT_CHECKOUT_ORIGIN;
+    const localePrefix = body.locale ? `/${body.locale}` : '';
+    const reportUrl = `${baseUrl}${localePrefix}/report/full/${encodeURIComponent(body.reportId)}`;
 
     const result = await this.paymentService.createCheckoutSession({
       reportId: body.reportId,
       userEmail: body.userEmail,
       region: body.region || 'en',
       variant: body.variant,
-      successUrl: `${baseUrl}/report/full/${body.reportId}`,
-      cancelUrl: `${baseUrl}/scan/${body.reportId}`,
+      clientKey: req?.ip,
+      // Back to the report page in the visitor's language either way: paid
+      // → full report; cancelled → the same page shows the paywall again.
+      // (The scan page is keyed by job id, so /scan/<reportId> was a 404.)
+      successUrl: reportUrl,
+      cancelUrl: reportUrl,
     });
 
     return {
@@ -111,8 +128,9 @@ export class PaymentController {
   getPricing(
     @Query('region') region: string = 'en',
     @Query('variant') variant?: 'A' | 'B',
+    @Req() req?: Request,
   ) {
-    const pricing = this.paymentService.getPricing(region, variant);
+    const pricing = this.paymentService.getPricing(region, variant, req?.ip);
     return {
       amount: pricing.amount / 100,
       currency: pricing.currency,

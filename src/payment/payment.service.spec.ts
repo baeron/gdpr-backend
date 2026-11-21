@@ -163,6 +163,31 @@ describe('PaymentService', () => {
       expect(svc.getPricing('de').variant).toBe('A');
     });
 
+    it('gives the same visitor the same arm on every request', () => {
+      const arms = Array.from(
+        { length: 20 },
+        () => service.getPricing('de', undefined, '203.0.113.7').variant,
+      );
+      expect(new Set(arms).size).toBe(1);
+    });
+
+    it('spreads visitors across both arms by IP', () => {
+      const arms = new Set(
+        Array.from(
+          { length: 64 },
+          (_, i) =>
+            service.getPricing('de', undefined, `198.51.100.${i}`).variant,
+        ),
+      );
+      expect(arms).toEqual(new Set(['A', 'B']));
+    });
+
+    it('ignores an unknown variant instead of pricing it at undefined', () => {
+      const p = service.getPricing('de', 'C' as any, '203.0.113.7');
+      expect(['A', 'B']).toContain(p.variant);
+      expect([999, 1499]).toContain(p.amount);
+    });
+
     it('splits traffic between both arms when no variant is given', () => {
       const seen = new Set(
         Array.from({ length: 200 }, () => service.getPricing('de').variant),
@@ -181,6 +206,49 @@ describe('PaymentService', () => {
           cancelUrl: 'https://example.com/cancel',
         }),
       ).rejects.toThrow('Payment service not configured');
+    });
+
+    function withStripe(env: Record<string, string> = {}) {
+      const create = jest.fn().mockResolvedValue({
+        id: 'cs_1',
+        url: 'https://checkout.stripe.com/x',
+      });
+      const svc = new PaymentService(
+        {
+          get: jest.fn(
+            (k: string) =>
+              env[k] ?? (k === 'STRIPE_SECRET_KEY' ? 'sk_test' : undefined),
+          ),
+        } as any,
+        mockPrisma,
+      );
+      (svc as any).stripe = { checkout: { sessions: { create } } };
+      return { svc, create };
+    }
+    const params = {
+      reportId: 'report-1',
+      region: 'de',
+      variant: 'B' as const,
+      successUrl: 'https://policytracker.eu/de/report/full/report-1',
+      cancelUrl: 'https://policytracker.eu/de/report/full/report-1',
+    };
+
+    it('charges the displayed arm and asks Stripe for an invoice', async () => {
+      const { svc, create } = withStripe();
+      await svc.createCheckoutSession(params);
+      const [body] = create.mock.calls[0];
+      expect(body.line_items[0].price_data).toMatchObject({
+        currency: 'eur',
+        unit_amount: 1499,
+      });
+      expect(body.invoice_creation).toEqual({ enabled: true });
+      expect(body.cancel_url).toBe(params.cancelUrl);
+    });
+
+    it('can switch Stripe invoices off', async () => {
+      const { svc, create } = withStripe({ STRIPE_INVOICE_CREATION: 'false' });
+      await svc.createCheckoutSession(params);
+      expect(create.mock.calls[0][0].invoice_creation).toBeUndefined();
     });
   });
 
